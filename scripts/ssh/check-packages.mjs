@@ -96,8 +96,20 @@ try {
   // Policy verification belongs to the normal source install. This disposable
   // projection preserves that exact registry graph; do not require uncached
   // registry policy metadata again, and never relax the source workspace policy.
+  // A temporary consumer can be on another Windows drive or outside a
+  // workspace-local store configuration. Reuse the source install's store.
+  const sourceStore = runPnpm(["store", "path"]).trim();
+  assert.ok(path.isAbsolute(sourceStore), "pnpm must report an absolute store path.");
   runPnpm(
-    ["install", "--offline", "--frozen-lockfile", "--trust-lockfile", "--ignore-scripts"],
+    [
+      "install",
+      "--store-dir",
+      sourceStore,
+      "--offline",
+      "--frozen-lockfile",
+      "--trust-lockfile",
+      "--ignore-scripts",
+    ],
     consumer,
   );
   execFileSync(
