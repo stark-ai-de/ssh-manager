@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a focused improvement and explain the user need.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and intended user
+      description: Explain what you cannot do today and the access path involved.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe an observable result, not only an implementation choice.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and scope
+      description: Existing workarounds, related tools and what should stay out of scope.
+  - type: textarea
+    id: safety
+    attributes:
+      label: Security and compatibility considerations
+      description: Does this affect trust, permissions, credentials, session lifetime, state or distribution? Do not include private data.

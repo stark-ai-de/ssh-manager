@@ -1,0 +1,19 @@
+name: Support question
+description: Ask a usage question after checking the documentation.
+body:
+  - type: markdown
+    attributes:
+      value: "Support is best effort. Never post keys, tokens, real host inventories or state files. Security concerns belong in the private channel in SECURITY.md."
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to do?
+      description: Include the access path, version and sanitized context.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: Documentation or steps already tried
+    validations:
+      required: true

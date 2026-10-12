@@ -1,13 +1,31 @@
 {
   "name": "@stark-ai/ssh-manager-runtime",
   "version": "1.0.0",
+  "description": "Authenticated local SSH daemon, typed API client, CLI and browser terminal viewer.",
+  "keywords": [
+    "daemon",
+    "ssh",
+    "ssh-manager",
+    "terminal",
+    "typescript"
+  ],
+  "homepage": "https://github.com/stark-ai-de/ssh-manager#readme",
+  "bugs": {
+    "url": "https://github.com/stark-ai-de/ssh-manager/issues"
+  },
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stark-ai-de/ssh-manager.git",
+    "directory": "packages/ssh-manager-runtime"
+  },
   "bin": {
     "ssh-management": "dist/cli.js"
   },
   "files": [
     "dist",
-    "viewer"
+    "viewer",
+    "README.md"
   ],
   "type": "module",
   "exports": {

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/stark-ai-de/ssh-manager/blob/main/SECURITY.md
+    about: Do not post vulnerabilities, credentials or private host data in public issues.
+  - name: Documentation and troubleshooting
+    url: https://github.com/stark-ai-de/ssh-manager/blob/main/docs/README.md
+    about: Start with the setup, compatibility and troubleshooting guides.

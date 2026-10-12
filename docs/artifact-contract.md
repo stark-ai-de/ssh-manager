@@ -2,10 +2,14 @@
 
 `pnpm build` compiles the independent packages and bundles the MCP, daemon and CLI with viewer assets and dependency notices. `pnpm artifact` exports `dist/artifact/runtime` only from a clean committed source tree and checks its build-input hashes against that source.
 
-`ARTIFACT-MANIFEST.json` has format version 1, runtime version, management API version, Node minimum, fixed public source repository, complete source commit, build-manifest SHA-256 and a sorted list of relative file paths, sizes and SHA-256 digests. The manifest does not include itself in its file list. Consumers separately pin its digest.
+`ARTIFACT-MANIFEST.json` has format version 1, runtime version, management API version, Node minimum, fixed public source repository, complete source commit, build-manifest SHA-256 and a sorted list of relative file paths, sizes and SHA-256 digests. The manifest does not include itself in its file list. Consumers separately pin its digest. A matching manifest downloaded with the same untrusted payload is not publisher authentication; obtain the pin through an independently trusted review/release channel.
 
 Required payload includes mcp.mjs, daemon.mjs, cli.mjs, BUILD-MANIFEST.json, NOTICE.txt, LICENSE and viewer assets. Symlinks, special files and path escapes are forbidden. Consumers compare the entire payload inventory, reject missing/extra/mutated files and copy only the verified artifact.
 
 The Skills repository imports a reviewed immutable candidate artifact and records its producer commit and manifest digest. No network, private checkout, dependency installation or source rebuild is required during normal plugin generation. Importing a new version is an explicit operation.
+
+The offline consumer verifier is `node scripts/ssh/verify-artifact.mjs <runtime-directory> <trusted-manifest-sha256> [expected-source-commit]`. It requires a trusted digest, rejects unsafe/duplicate/unsorted inventory paths, missing/extra/mutated payloads, unexpected directories and symlinks/special files, and checks required payloads and build metadata. It never executes candidate code or reads SSH state. Use a privately staged, immutable candidate directory; this is not protection against a hostile same-user process concurrently replacing filesystem ancestors. The format-1 verifier bounds the manifest to 1 MiB, entries to 4096 and individual payload files to 64 MiB; a larger future distribution needs an explicit contract review.
+
+Use the verifier from a trusted source checkout, not an unverified script supplied inside a candidate download. See [releases](releases.md) for the operator workflow and [validation](validation.md) for negative fixtures.
 
 This artifact is a distribution unit, not a claim that a GitHub Release or npm package has been published. Releases and merges require separate authorization. Full dependency notices and build provenance travel with the artifact; local runtime state and secrets do not.

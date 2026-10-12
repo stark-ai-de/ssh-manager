@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a reproducible problem using synthetic data.
+body:
+  - type: markdown
+    attributes:
+      value: "For security issues use SECURITY.md. Do not paste tokens, keys, vault files, private paths, real host inventories or unredacted terminal output."
+  - type: input
+    id: version
+    attributes:
+      label: Package version or source commit
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node/pnpm versions, target OS if relevant, and library/API/CLI/viewer/MCP access path. No identifying host data.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Use a local fixture or reserved example names. Include steps, not credentials or state dumps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+      description: Include the error code and whether the outcome is unknown after a disconnect.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Checks already performed
+      description: Commands run, results, and any skipped checks with reasons.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed secrets, private state and identifying host data, and this is not a private vulnerability report.
+          required: true
