@@ -39,8 +39,9 @@ test(
         "client.key",
         authKey.export({ format: "pem", type: "pkcs1", cipher: "aes-256-cbc", passphrase }),
       );
-    const tmuxSocket = path.join(directory, "tmux.socket"),
+    const tmuxSocket = path.join(directory, `tmux-${os.userInfo().uid}`, "default"),
       executable = path.join(directory, "tmux");
+    fs.mkdirSync(path.dirname(tmuxSocket), { mode: 0o700 });
     fs.writeFileSync(
       executable,
       `#!/bin/sh\nexec '${tmux.replaceAll("'", "'\\''")}' -S '${tmuxSocket.replaceAll("'", "'\\''")}' "$@"\n`,
@@ -56,7 +57,7 @@ test(
     await new Promise((r) => reservation.close(r));
     const configuration = write(
       "sshd_config",
-      `Port ${port}\nListenAddress 127.0.0.1\nHostKey ${hostFile}\nPidFile ${directory}/sshd.pid\nAuthorizedKeysFile ${authorized}\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nAllowUsers ${os.userInfo().username}\nAllowTcpForwarding yes\nPermitTTY yes\nSetEnv PATH=${directory}:${process.env.PATH}\nSubsystem sftp internal-sftp\n`,
+      `Port ${port}\nListenAddress 127.0.0.1\nHostKey ${hostFile}\nPidFile ${directory}/sshd.pid\nAuthorizedKeysFile ${authorized}\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nAllowUsers ${os.userInfo().username}\nAllowTcpForwarding yes\nPermitTTY yes\nSetEnv PATH=${directory}:${process.env.PATH} TMUX_TMPDIR=${directory}\nSubsystem sftp internal-sftp\n`,
     );
     const daemon = spawn(sshd, ["-D", "-e", "-f", configuration], {
       stdio: ["ignore", "ignore", "pipe"],
@@ -186,7 +187,8 @@ test(
       agent,
       manager.connections(agent).find((c) => c.targetId === profile.id).id,
     );
-    spawnSync(tmux, ["-S", tmuxSocket, "kill-server"], { stdio: "ignore" });
+    const killed = spawnSync(tmux, ["-S", tmuxSocket, "kill-server"], { encoding: "utf8" });
+    assert.equal(killed.status, 0, "The fixture must kill its own isolated tmux server.");
     await assert.rejects(manager.sessions.recover(agent, terminal.id), {
       code: "TMUX_UNAVAILABLE",
     });
