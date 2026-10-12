@@ -1,0 +1,36 @@
+name: SSH qualification
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/setup@v3
+        with:
+          version: 12.9.1
+          runtime: node@24.18.0
+          install: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm validate
+      - name: Native Unix SSH fixture
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update && sudo apt-get install -y openssh-server tmux; else brew install tmux; fi
+          SSH_MANAGER_NATIVE_TESTS=1 SSH_MANAGER_SSHD="$(command -v sshd)" SSH_MANAGER_TMUX="$(command -v tmux)" pnpm test
+      - run: pnpm artifact
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ssh-runtime-${{ matrix.os }}
+          path: dist/artifact/runtime

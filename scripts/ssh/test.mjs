@@ -1,0 +1,17 @@
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+
+const tests = ["ssh-manager", "ssh-manager-runtime", "ssh-manager-mcp"].flatMap((name) => {
+  const directory = path.join("packages", name, "test");
+  return fs.existsSync(directory)
+    ? fs
+        .readdirSync(directory)
+        .filter((f) => f.endsWith(".test.mjs"))
+        .map((f) => path.join(directory, f))
+    : [];
+});
+const result = spawnSync(process.execPath, ["--test", "--test-timeout=60000", ...tests], {
+  stdio: "inherit",
+});
+process.exit(result.status ?? 1);

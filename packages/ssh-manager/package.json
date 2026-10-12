@@ -1,0 +1,37 @@
+{
+  "name": "@stark-ai/ssh-manager",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "import": "./dist/contracts.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0",
+    "ssh2": "1.17.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@types/ssh2": "^1.15.5",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=24.18.0"
+  }
+}
