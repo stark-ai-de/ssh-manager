@@ -63,8 +63,10 @@ jobs:
       - run: pnpm build
       - name: Install isolated CI browser tooling (never at MCP startup)
         run: |
-          npm install --global agent-browser@0.38.2
-          agent-browser install --with-deps
+          BROWSER_PREFIX="$RUNNER_TEMP/ssh-browser-tools"
+          npm install --global --prefix "$BROWSER_PREFIX" agent-browser@0.38.2
+          echo "$BROWSER_PREFIX/bin" >> "$GITHUB_PATH"
+          "$BROWSER_PREFIX/bin/agent-browser" install --with-deps
       - name: Qualify browser terminal with temporary credentials and state
         run: pnpm test
         env:
