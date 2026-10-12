@@ -1,0 +1,52 @@
+{
+  "name": "@stark-ai/ssh-manager-runtime",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "bin": {
+    "ssh-management": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "viewer"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./catalog": {
+      "types": "./dist/catalog.d.ts",
+      "import": "./dist/catalog.js"
+    },
+    "./launcher": {
+      "types": "./dist/launcher.d.ts",
+      "import": "./dist/launcher.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@fastify/websocket": "11.3.4",
+    "@stark-ai/ssh-manager": "workspace:*",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "fastify": "5.12.5",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "@types/ws": "^8.18.1",
+    "typescript": "^7.0.2",
+    "ws": "8.22.0"
+  },
+  "engines": {
+    "node": ">=24.18.0"
+  }
+}

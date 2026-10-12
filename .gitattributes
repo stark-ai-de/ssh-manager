@@ -1,0 +1,5 @@
+# Source bytes must match committed blobs on every build host.
+* text=auto eol=lf
+*.png binary
+*.zip binary
+*.gz binary
