@@ -163,7 +163,7 @@ test(
     const terminal = await manager.sessions.create(agent, profile.id, { tmux: true });
     await manager.sessions.attach(agent, terminal.id);
     manager.sessions.writer(agent, terminal.id);
-    manager.sessions.input(agent, terminal.id, "printf preserved-native-terminal\\n\r");
+    manager.sessions.input(agent, terminal.id, "printf '%s%s\\n' 'preserved-native-' 'terminal'\r");
     await until(() =>
       manager.sessions
         .read(agent, terminal.id)
