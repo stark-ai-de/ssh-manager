@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import net from "node:net";
+import os from "node:os";
 import { Readable } from "node:stream";
 import {
   configuredManager,
@@ -134,3 +135,25 @@ test("failed tunnel setup frees listener slots and forwarding streams obey conne
   socket.destroy();
   await ctx.manager.tunnels.close(agent, tunnel.id);
 });
+
+test(
+  "SFTP fixture preserves remote roots when the OS temporary root is a symlink",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "ssh-temp-alias-"));
+    const actual = path.join(base, "actual"),
+      alias = path.join(base, "alias");
+    fs.mkdirSync(actual);
+    fs.symlinkSync(actual, alias, "dir");
+    const fixture = await sshFixture({ temporaryRoot: alias });
+    const ctx = await configuredManager(fixture);
+    t.after(async () => {
+      ctx.close();
+      await fixture.close();
+      fs.rmSync(base, { recursive: true, force: true });
+    });
+    assert.equal(fixture.directory, fs.realpathSync(fixture.directory));
+    const result = await ctx.manager.files.read(agent, ctx.profile.id, "/allowed/hello.txt");
+    assert.equal(Buffer.from(result.data, "base64").toString(), "hello fixture\n");
+  },
+);

@@ -11,7 +11,11 @@ const tests = ["ssh-manager", "ssh-manager-runtime", "ssh-manager-mcp"].flatMap(
         .map((f) => path.join(directory, f))
     : [];
 });
-const result = spawnSync(process.execPath, ["--test", "--test-timeout=60000", ...tests], {
-  stdio: "inherit",
-});
+const result = spawnSync(
+  process.execPath,
+  ["--test", "--test-timeout=60000", "--test-reporter=tap", ...tests],
+  {
+    stdio: "inherit",
+  },
+);
 process.exit(result.status ?? 1);

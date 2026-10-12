@@ -25,7 +25,9 @@ export async function until(check, timeout = 4000) {
 }
 
 export async function sshFixture(options = {}) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ssh-counterpart-"));
+  const directory = fs.realpathSync(
+    fs.mkdtempSync(path.join(options.temporaryRoot ?? os.tmpdir(), "ssh-counterpart-")),
+  );
   const key = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({
     format: "pem",
     type: "pkcs1",
@@ -347,7 +349,10 @@ export async function sshFixture(options = {}) {
     counts,
     tmux,
     close: async () => {
-      for (const c of connections) c.end();
+      for (const c of connections) {
+        c.end();
+        c._sock.destroy(); // Fixture teardown must not await half-open nested channels.
+      }
       for (const s of forwards) s.close();
       await new Promise((resolve) => server.close(resolve));
       fs.rmSync(directory, { recursive: true, force: true });

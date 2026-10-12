@@ -19,7 +19,9 @@ test(
       tmux = process.env.SSH_MANAGER_TMUX;
     assert.ok(sshd && path.isAbsolute(sshd));
     assert.ok(tmux && path.isAbsolute(tmux));
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ssh-native-acceptance-"));
+    const directory = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "ssh-native-acceptance-")),
+    );
     const key = () => generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey;
     const hostKey = key().export({ format: "pem", type: "pkcs1" });
     const authKey = key();
