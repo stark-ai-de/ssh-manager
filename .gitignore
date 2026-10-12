@@ -3,3 +3,12 @@ dist/
 coverage/
 .codegraph/
 *.log
+*.tgz
+.env
+.env.*
+!.env.example
+# Local agent tooling and private working notes are not public source.
+.agents/
+.pi/
+skills-lock.json
+docs/specs/do-not-publish/

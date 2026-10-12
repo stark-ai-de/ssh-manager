@@ -1,12 +1,30 @@
 {
   "name": "@stark-ai/ssh-manager-mcp",
   "version": "1.0.0",
+  "description": "MCP stdio tools for SSH Manager's authenticated local management API.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ssh",
+    "ssh-manager",
+    "typescript"
+  ],
+  "homepage": "https://github.com/stark-ai-de/ssh-manager#readme",
+  "bugs": {
+    "url": "https://github.com/stark-ai-de/ssh-manager/issues"
+  },
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stark-ai-de/ssh-manager.git",
+    "directory": "packages/ssh-manager-mcp"
+  },
   "bin": {
     "ssh-management-mcp": "dist/main.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "type": "module",
   "exports": {

@@ -1,9 +1,27 @@
 {
   "name": "@stark-ai/ssh-manager",
   "version": "1.0.0",
+  "description": "Reusable TypeScript SSH management with explicit trust, target grants and resource lifecycles.",
+  "keywords": [
+    "sftp",
+    "ssh",
+    "ssh-manager",
+    "ssh2",
+    "typescript"
+  ],
+  "homepage": "https://github.com/stark-ai-de/ssh-manager#readme",
+  "bugs": {
+    "url": "https://github.com/stark-ai-de/ssh-manager/issues"
+  },
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stark-ai-de/ssh-manager.git",
+    "directory": "packages/ssh-manager"
+  },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "type": "module",
   "exports": {

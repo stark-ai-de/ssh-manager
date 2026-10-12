@@ -2,8 +2,12 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const tests = ["ssh-manager", "ssh-manager-runtime", "ssh-manager-mcp"].flatMap((name) => {
-  const directory = path.join("packages", name, "test");
+const tests = [
+  ...["ssh-manager", "ssh-manager-runtime", "ssh-manager-mcp"].map((name) =>
+    path.join("packages", name, "test"),
+  ),
+  path.join("scripts", "test"),
+].flatMap((directory) => {
   return fs.existsSync(directory)
     ? fs
         .readdirSync(directory)
