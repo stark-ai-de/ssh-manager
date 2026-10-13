@@ -1,6 +1,7 @@
 # SSH Manager
 
 - Use Linux development tools and preserve other contributors' changes.
+- Before architecture-affecting work, follow the accepted ADRs indexed in `docs/architecture.md`. Simplification follows ADR-0001; proposed decisions do not authorize implementation, and conflicts require an accepted successor.
 - Canonical management code lives in `packages/ssh-manager`; it imports neither HTTP nor MCP.
 - The runtime owns SSH connections and sessions. MCP uses the authenticated management API only.
 - Preserve host verification, human target grants, credential isolation and authenticated writer identity across every access path.

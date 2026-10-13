@@ -2,6 +2,14 @@
 
 SSH Manager has one canonical management library, an optional local runtime, and a thin MCP adapter. The runtime owns long-lived SSH connections and terminal sessions; clients attach to those resources rather than owning separate SSH transports.
 
+## Architecture decisions
+
+| Decision                                                                                                  | Status   | Applies to                                                  |
+| --------------------------------------------------------------------------------------------------------- | -------- | ----------------------------------------------------------- |
+| [ADR-0001: Behavior-preserving code simplification](adrs/0001-behavior-preserving-code-simplification.md) | Accepted | Simplification, shared ownership and removal of custom code |
+
+Accepted decisions are binding. Proposed decisions remain pending; an accepted successor must name the decision it replaces, with a reciprocal link from the predecessor. Implementation evidence belongs in the [simplification specification](specs/codebase-simplification-spec.md), not in the decision itself.
+
 ## Components and trust boundaries
 
 ```mermaid

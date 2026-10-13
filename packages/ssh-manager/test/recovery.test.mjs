@@ -9,6 +9,7 @@ import { runApprovedCommand } from "../examples/embedded.mjs";
 import {
   sshFixture,
   managedFixture,
+  profileInput,
   operator,
   agent,
   vaultPassword,
@@ -17,16 +18,15 @@ import {
   delay,
 } from "./fixture.mjs";
 
-const strip = (profile) => {
-  const { id: _id, revision: _revision, ...data } = profile;
-  return data;
-};
 test("unknown, changed and revoked keys fail closed without editing known_hosts", async (t) => {
   const ctx = await managedFixture(t);
   const { fixture } = ctx;
   const different = await sshFixture();
   t.after(different.close);
-  const profile = ctx.manager.createProfile(operator, { ...strip(ctx.profile), name: "unknown" });
+  const profile = ctx.manager.createProfile(operator, {
+    ...profileInput(ctx.profile),
+    name: "unknown",
+  });
   ctx.manager.setGrants(operator, profile.id, 1, allCapabilities);
   await assert.rejects(ctx.manager.openConnection(agent, profile.id), { code: "HOST_KEY_UNKNOWN" });
   const inspected = await ctx.manager.inspectHost(operator, profile.id);
@@ -121,6 +121,7 @@ test("pool wait cancellation, group partial errors, recordings and independent e
   });
   const { manager, profile } = ctx;
   const terminal = await manager.sessions.create(agent, profile.id, { recording: true });
+  await assert.rejects(manager.inspectHost(operator, profile.id), { code: "LIMIT" });
   await until(() => manager.sessions.read(agent, terminal.id).output.parts.length);
   const recording = manager.sessions.recording(agent, terminal.id);
   assert.ok(recording.text.includes("fixture"));
@@ -159,6 +160,66 @@ test("pool wait cancellation, group partial errors, recordings and independent e
   });
   assert.equal(embedded.job.exitCode, 0);
 });
+test("inspection budgets count pending and established connections independently", async (t) => {
+  for (const [name, limits] of [
+    ["total transports", { connections: 1, perTarget: 2 }],
+    ["per target", { connections: 2, perTarget: 1 }],
+  ]) {
+    await t.test(name, async (t) => {
+      const { manager, profile, fixture } = await managedFixture(t, {
+        limits,
+        ssh: { authDelay: 250 },
+      });
+      const opening = manager.openConnection(agent, profile.id);
+      await until(() => fixture.counts.auth > 0);
+      assert.deepEqual(manager.connections(agent), []);
+      await assert.rejects(manager.inspectHost(operator, profile.id), { code: "LIMIT" });
+      const connection = await opening;
+      await assert.rejects(manager.inspectHost(operator, profile.id), { code: "LIMIT" });
+      assert.equal((await manager.openConnection(agent, profile.id)).id, connection.id);
+      manager.closeConnection(agent, connection.id);
+      assert.equal(
+        (await manager.inspectHost(operator, profile.id)).fingerprint,
+        fixture.fingerprint,
+      );
+    });
+  }
+});
+test("pool eviction respects the total budget and saturated jump dependencies", async (t) => {
+  for (const [name, limits] of [
+    ["total transports", { connections: 2, perTarget: 2 }],
+    ["per target", { connections: 4, perTarget: 1 }],
+  ]) {
+    await t.test(name, async (t) => {
+      const { manager, profile, fixture } = await managedFixture(t, { limits });
+      const profiles = [[], [profile.id]].map((jumpIds, index) => {
+        const target = manager.createProfile(operator, {
+          ...profileInput(profile),
+          name: `eviction-${index}`,
+          jumpIds,
+        });
+        manager.confirmHost(
+          operator,
+          target.id,
+          1,
+          fixture.publicKey.toString("base64"),
+          fixture.fingerprint,
+        );
+        manager.setGrants(operator, target.id, 1, allCapabilities);
+        return target;
+      });
+      const [unrelated, routed] = profiles;
+      await manager.openConnection(agent, unrelated.id);
+      await manager.openConnection(agent, profile.id);
+      const connection = await manager.openConnection(agent, routed.id);
+      assert.deepEqual(
+        manager.connections(agent).map((item) => item.targetId),
+        limits.perTarget === 1 ? [unrelated.id, routed.id] : [routed.id],
+      );
+      assert.equal((await manager.openConnection(agent, routed.id)).id, connection.id);
+    });
+  }
+});
 test("flat jump chains and both configured proxy protocols authenticate through verified hops", async (t) => {
   const ctx = await managedFixture(t);
   const first = ctx.fixture;
@@ -169,7 +230,7 @@ test("flat jump chains and both configured proxy protocols authenticate through 
     for (const p of proxies) await p.close();
   });
   const target = ctx.manager.createProfile(operator, {
-    ...strip(ctx.profile),
+    ...profileInput(ctx.profile),
     name: "via-jump",
     port: final.port,
     jumpIds: [ctx.profile.id],
@@ -188,7 +249,7 @@ test("flat jump chains and both configured proxy protocols authenticate through 
     const proxy = await proxyFixture(kind);
     proxies.push(proxy);
     const profile = ctx.manager.createProfile(operator, {
-      ...strip(ctx.profile),
+      ...profileInput(ctx.profile),
       name: kind,
       port: final.port,
       proxy: { kind, host: "127.0.0.1", port: proxy.port },
@@ -207,7 +268,7 @@ test("flat jump chains and both configured proxy protocols authenticate through 
   }
   const additional = Array.from({ length: 3 }, (_, index) => {
     const jump = ctx.manager.createProfile(operator, {
-      ...strip(ctx.profile),
+      ...profileInput(ctx.profile),
       name: `jump-${index}`,
     });
     ctx.manager.confirmHost(
@@ -221,7 +282,7 @@ test("flat jump chains and both configured proxy protocols authenticate through 
     return jump.id;
   });
   const four = ctx.manager.createProfile(operator, {
-    ...strip(ctx.profile),
+    ...profileInput(ctx.profile),
     name: "four-jumps",
     port: final.port,
     jumpIds: [ctx.profile.id, ...additional],
@@ -238,13 +299,13 @@ test("flat jump chains and both configured proxy protocols authenticate through 
   assert.throws(
     () =>
       ctx.manager.createProfile(operator, {
-        ...strip(ctx.profile),
+        ...profileInput(ctx.profile),
         jumpIds: [ctx.profile.id, ...additional, target.id],
       }),
     { code: "INVALID_ARGUMENT" },
   );
   const loop = ctx.manager.createProfile(operator, {
-    ...strip(ctx.profile),
+    ...profileInput(ctx.profile),
     name: "loop",
     jumpIds: [ctx.profile.id, ctx.profile.id],
   });

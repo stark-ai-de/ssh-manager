@@ -13,7 +13,7 @@ import {
   type ManagerEvent,
 } from "./contracts.js";
 import { ConnectionPool, type Lease } from "./connections.js";
-import { id, request } from "./util.js";
+import { id, request, authorizedResourceInfo } from "./util.js";
 import { acceptSocks, connectSocket } from "./proxy.js";
 
 type Tunnel = {
@@ -299,17 +299,11 @@ export class Tunnels {
     return t;
   }
   list(actor: Actor, targetId?: string) {
-    return [...this.tunnels.values()]
-      .filter((t) => !targetId || t.info.targetId === targetId)
-      .filter((t) => {
-        try {
-          this.get(actor, t.info.id);
-          return true;
-        } catch {
-          return false;
-        }
-      })
-      .map((t) => ({ ...t.info }));
+    return authorizedResourceInfo(
+      this.tunnels.values(),
+      (info) => this.get(actor, info.id),
+      targetId,
+    );
   }
   async close(actor: Actor, tunnelId: string) {
     const t = this.get(actor, tunnelId);

@@ -17,6 +17,7 @@ User-visible changes are recorded here. `Unreleased` is not a published release,
 
 ### Changed
 
+- Shared SSH resource listing and capacity checks avoid redundant filtering while preserving grants, ordering and connection lifecycle behavior.
 - `pnpm validate` now includes formatting, documentation and consumer-package checks as well as build/tests.
 - README now explains intended audiences, early-stage support, safe onboarding and project boundaries.
 

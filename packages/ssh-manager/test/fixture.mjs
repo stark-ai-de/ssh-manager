@@ -14,6 +14,10 @@ export const password = "ephemeral-test-password";
 export const vaultPassword = "ephemeral-vault-password";
 export const allCapabilities = ["connect", "shell", "files.read", "files.write", "tunnel"];
 export const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export function profileInput(profile) {
+  const { id: _id, revision: _revision, ...input } = profile;
+  return input;
+}
 export async function until(check, timeout = 4000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {

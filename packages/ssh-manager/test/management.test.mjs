@@ -12,6 +12,7 @@ import { OutputBuffer } from "../dist/util.js";
 import { proxySocket } from "../dist/proxy.js";
 import {
   managedFixture,
+  profileInput,
   operator,
   agent,
   second,
@@ -100,27 +101,92 @@ test("permissions, explicit trust, connection reuse and profile revisions apply 
   await assert.rejects(manager.openConnection(agent, plain.id), { code: "FORBIDDEN" });
   assert.throws(
     () =>
-      manager.updateProfile(agent, profile.id, 1, { ...strip(profile), port: fixture.port + 1 }),
+      manager.updateProfile(agent, profile.id, 1, {
+        ...profileInput(profile),
+        port: fixture.port + 1,
+      }),
     { code: "FORBIDDEN" },
   );
   const changed = manager.updateProfile(operator, profile.id, 1, {
-    ...strip(profile),
+    ...profileInput(profile),
     username: "changed-user",
   });
   assert.equal(changed.revision, 2);
   assert.equal(manager.connections(agent).length, 0);
   await assert.rejects(manager.openConnection(agent, profile.id), { code: "FORBIDDEN" });
-  assert.throws(() => manager.updateProfile(operator, profile.id, 1, strip(profile)), {
+  assert.throws(() => manager.updateProfile(operator, profile.id, 1, profileInput(profile)), {
     code: "CONFLICT",
   });
   const diagnostic = JSON.stringify(manager.diagnose(agent, profile.id));
   assert.ok(!diagnostic.includes(password));
   assert.ok(!JSON.stringify(manager.audit(agent)).includes(password));
 });
-const strip = (profile) => {
-  const { id: _id, revision: _revision, ...input } = profile;
-  return input;
-};
+test("resource lists preserve order and snapshots while filtering targets and revoked authority", async (t) => {
+  const { manager, profile, fixture } = await managedFixture(t);
+  const other = manager.createProfile(operator, { ...profileInput(profile), name: "other target" });
+  manager.confirmHost(
+    operator,
+    other.id,
+    1,
+    fixture.publicKey.toString("base64"),
+    fixture.fingerprint,
+  );
+  manager.setGrants(operator, other.id, 1, allCapabilities);
+  const listings = [
+    [manager.sessions, (target) => manager.sessions.create(agent, target)],
+    [manager.jobs, (target) => manager.jobs.start(agent, target, "hang")],
+    [
+      manager.tunnels,
+      (target) => manager.tunnels.create(agent, target, { kind: "socks", listenPort: 0 }),
+    ],
+  ];
+  const expected = [];
+  for (const [service, create] of listings) {
+    const resources = [];
+    for (const target of [profile.id, other.id, profile.id]) resources.push(await create(target));
+    const selected = [resources[0].id, resources[2].id];
+    expected.push(selected);
+    assert.deepEqual(
+      service.list(agent).map((item) => item.id),
+      resources.map((item) => item.id),
+    );
+    assert.deepEqual(
+      service.list(agent, profile.id).map((item) => item.id),
+      selected,
+    );
+    assert.deepEqual(service.list(agent, "missing-target"), []);
+    service.list(agent)[0].state = "caller-owned-copy";
+    assert.equal(service.list(agent)[0].state, resources[0].state);
+  }
+  const connections = manager.connections(agent);
+  assert.deepEqual(
+    connections.map((item) => item.targetId),
+    [profile.id, other.id],
+  );
+  manager.connections(agent)[0].channels = -1;
+  assert.equal(manager.connections(agent)[0].channels, connections[0].channels);
+  manager.setGrants(operator, other.id, 1, ["connect"]);
+  for (const [index, [service]] of listings.entries()) {
+    assert.deepEqual(
+      service.list(agent).map((item) => item.id),
+      expected[index],
+    );
+    assert.deepEqual(service.list(agent, other.id), []);
+  }
+  manager.setGrants(operator, other.id, 1, []);
+  await assert.rejects(manager.openConnection(operator, other.id), { code: "FORBIDDEN" });
+  assert.deepEqual(
+    manager.connections(agent).map((item) => item.targetId),
+    [profile.id],
+  );
+  assert.deepEqual(
+    manager.connections(operator).map((item) => item.targetId),
+    [profile.id],
+  );
+  manager.shutdown();
+  assert.deepEqual(manager.connections(agent), []);
+  for (const [service] of listings) assert.deepEqual(service.list(agent), []);
+});
 test("jobs, readers, writer authority, detach and vault lock retain truthful lifecycles", async (t) => {
   const ctx = await managedFixture(t);
   const { fixture, manager, profile } = ctx;
@@ -242,7 +308,7 @@ test("channel deadlines, concurrent profile invalidation and bounded pool waiter
   const attempt = other.manager.openConnection(agent, other.profile.id);
   await delay(30);
   other.manager.updateProfile(operator, other.profile.id, 1, {
-    ...strip(other.profile),
+    ...profileInput(other.profile),
     username: "changed",
   });
   await assert.rejects(attempt);

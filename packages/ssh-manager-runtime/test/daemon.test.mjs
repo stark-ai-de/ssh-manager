@@ -4,7 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { ManagementClient } from "../dist/client.js";
 import {
   sshFixture,
@@ -18,6 +19,12 @@ import {
 test("bundled MCP starts an independent daemon; CLI reuses it and client EOF preserves a live PTY", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ssh-daemon-contract-"));
   const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const cli = (...args) =>
+    promisify(execFile)(
+      process.execPath,
+      [path.join(root, "dist/ssh-runtime/cli.mjs"), ...args, "--state-directory", directory],
+      { timeout: 15000 },
+    );
   const fixture = await sshFixture();
   let operatorClient, agentClient, child;
   t.after(async () => {
@@ -94,18 +101,24 @@ test("bundled MCP starts an independent daemon; CLI reuses it and client EOF pre
     "running",
   );
   assert.equal((await fetch(metadata.url)).status, 200);
-  const cli = spawn(process.execPath, [
-    path.join(root, "dist/ssh-runtime/cli.mjs"),
-    "start",
-    "--state-directory",
-    directory,
-  ]);
-  let output = "";
-  cli.stdout.on("data", (data) => {
-    output += data;
-  });
-  await new Promise((resolve) => cli.once("exit", resolve));
-  assert.equal(cli.exitCode, 0);
-  assert.equal(JSON.parse(output).url, metadata.url);
+  const started = await cli("start");
+  assert.equal(JSON.parse(started.stdout).url, metadata.url);
+  assert.equal(started.stderr, "");
   assert.equal(JSON.parse(fs.readFileSync(path.join(directory, "runtime.json"))).pid, metadata.pid);
+  const locked = await cli("vault-lock");
+  const status = await operatorClient.call("ssh_vault_status", {});
+  assert.equal(status.locked, true);
+  assert.equal(locked.stdout, JSON.stringify(status) + "\n");
+  assert.equal(locked.stderr, "");
+  const input = path.join(directory, "cli-input.json");
+  fs.writeFileSync(input, "{}");
+  const inspected = await cli("operator", "ssh_vault_status", input);
+  assert.equal(inspected.stdout, JSON.stringify(status, null, 2) + "\n");
+  assert.equal(inspected.stderr, "");
+  for (const command of ["vault-init", "vault-unlock", "vault-rotate"])
+    await assert.rejects(cli(command), {
+      code: 1,
+      stdout: "",
+      stderr: "Local setup failed. Check the operation, argument file and interactive terminal.\n",
+    });
 });

@@ -107,6 +107,14 @@ async function pull() {
     pulling = false;
   }
 }
+function disconnected() {
+  generation++;
+  attached = false;
+  writer = false;
+  inputRequested = false;
+  document.querySelector("#writer").disabled = true;
+  status.textContent = "Viewer disconnected; reattach for a current snapshot.";
+}
 async function detach() {
   generation++;
   attached = false;
@@ -166,12 +174,7 @@ document.querySelector("#login").addEventListener("submit", async (event) => {
     };
     socket.onclose = () => {
       if (current !== generation) return;
-      generation++;
-      attached = false;
-      writer = false;
-      inputRequested = false;
-      document.querySelector("#writer").disabled = true;
-      status.textContent = "Viewer disconnected; reattach for a current snapshot.";
+      disconnected();
     };
     document.querySelector("#detach").disabled = false;
     polling = setInterval(pull, 1000);
@@ -222,12 +225,7 @@ new ResizeObserver(() => {
     socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
 }).observe(terminalElement);
 window.addEventListener("pagehide", () => {
-  generation++;
-  attached = false;
-  inputRequested = false;
-  writer = false;
+  disconnected();
   clearInterval(polling);
-  document.querySelector("#writer").disabled = true;
-  status.textContent = "Viewer disconnected; reattach for a current snapshot.";
   socket?.close();
 });
