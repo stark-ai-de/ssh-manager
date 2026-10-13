@@ -27,6 +27,19 @@ function existingDirectory(directory) {
   }
 }
 
+// Resolve missing parents without creating them; existing links must resolve successfully.
+function prospectiveRealpath(directory) {
+  const missing = [];
+  let ancestor = directory;
+  while (!fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) throw new Error("Artifact output ancestor is missing.");
+    missing.unshift(path.basename(ancestor));
+    ancestor = parent;
+  }
+  return path.join(fs.realpathSync(ancestor), ...missing);
+}
+
 /**
  * Produce and verify before replacing output. The caller establishes Git provenance.
  * The generated digest proves contract agreement here, not publisher authentication.
@@ -45,12 +58,12 @@ export function produceRuntimeArtifact({
     throw new Error("Artifact source and output directories must not overlap.");
   if (!existingDirectory(source)) throw new Error("Runtime bundle directory is missing.");
   const parent = path.dirname(output);
-  fs.mkdirSync(parent, { recursive: true });
-  // Ancestor links may alias the source even when the requested paths look disjoint.
+  // Check aliases before creating even missing parents, which may lie inside the source.
   const canonicalSource = fs.realpathSync(source);
-  const canonicalOutput = path.join(fs.realpathSync(parent), path.basename(output));
+  const canonicalOutput = path.join(prospectiveRealpath(parent), path.basename(output));
   if (contains(canonicalSource, canonicalOutput) || contains(canonicalOutput, canonicalSource))
     throw new Error("Artifact source and output directories must not overlap.");
+  fs.mkdirSync(parent, { recursive: true });
   const staging = fs.mkdtempSync(path.join(parent, ".runtime-export-"));
   const candidate = path.join(staging, "candidate");
   const previous = path.join(staging, "previous");

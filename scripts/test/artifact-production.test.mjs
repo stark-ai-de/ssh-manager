@@ -280,7 +280,7 @@ test("manifest-size rejection preserves previous output", (t) => {
   noStaging(options);
 });
 
-test("ancestor links cannot place staging inside the source bundle", (t) => {
+test("ancestor overlap rejection preserves source directories and permits a later export", (t) => {
   const { root, options } = fixture(t);
   const alias = path.join(root, "bundle-alias");
   try {
@@ -290,12 +290,78 @@ test("ancestor links cannot place staging inside the source bundle", (t) => {
       return t.skip("Directory symlinks require Windows developer mode or privileges.");
     throw error;
   }
+  const accepted = produceRuntimeArtifact(options);
   const before = snapshot(options.bundleDirectory);
-  assert.throws(
-    () => produceRuntimeArtifact({ ...options, outputDirectory: path.join(alias, "output") }),
-    /overlap/,
-  );
+  const inventory = fs.readdirSync(options.bundleDirectory, { recursive: true }).sort();
+  const previous = snapshot(options.outputDirectory);
+  for (const parts of [["output"], ["new-parent", "output"], ["missing", "nested", "output"]]) {
+    assert.throws(
+      () => produceRuntimeArtifact({ ...options, outputDirectory: path.join(alias, ...parts) }),
+      /overlap/,
+    );
+    // File hashes alone miss empty directories left behind by rejected exports.
+    assert.deepEqual(
+      fs.readdirSync(options.bundleDirectory, { recursive: true }).sort(),
+      inventory,
+    );
+    assert.deepEqual(snapshot(options.bundleDirectory), before);
+    assert.deepEqual(snapshot(options.outputDirectory), previous);
+    assert.deepEqual(verifyRuntimeArtifact(options.outputDirectory, accepted), accepted);
+    noStaging(options);
+  }
+  const next = produceRuntimeArtifact(options);
+  assert.deepEqual(verifyRuntimeArtifact(options.outputDirectory, next), next);
+  noStaging(options);
+});
+
+test("disjoint ancestor links allow missing output parents and artifact replacement", (t) => {
+  const { root, options } = fixture(t);
+  const destination = path.join(root, "destination");
+  const alias = path.join(root, "destination-alias");
+  fs.mkdirSync(destination);
+  try {
+    fs.symlinkSync(destination, alias, "junction");
+  } catch (error) {
+    if (process.platform === "win32" && error.code === "EPERM")
+      return t.skip("Directory symlinks require Windows developer mode or privileges.");
+    throw error;
+  }
+  const before = snapshot(options.bundleDirectory);
+  const aliased = { ...options, outputDirectory: path.join(alias, "new", "nested", "runtime") };
+  const physical = path.join(destination, "new", "nested", "runtime");
+  const first = produceRuntimeArtifact(aliased);
+  assert.deepEqual(verifyRuntimeArtifact(physical, first), first);
+  const next = produceRuntimeArtifact({ ...aliased, runtimeVersion: "1.1.0" });
+  assert.deepEqual(verifyRuntimeArtifact(physical, next), next);
+  assert.equal(next.runtimeVersion, "1.1.0");
   assert.deepEqual(snapshot(options.bundleDirectory), before);
+  noStaging(aliased);
+});
+
+test("dangling output ancestors fail before any directory creation", (t) => {
+  const { root, options } = fixture(t);
+  const destination = path.join(root, "missing-destination");
+  const alias = path.join(root, "dangling-alias");
+  try {
+    fs.symlinkSync(destination, alias, "junction");
+  } catch (error) {
+    if (process.platform === "win32" && error.code === "EPERM")
+      return t.skip("Directory symlinks require Windows developer mode or privileges.");
+    throw error;
+  }
+  const before = fs.readdirSync(root).sort();
+  const mkdir = t.mock.method(fs, "mkdirSync", fs.mkdirSync);
+  assert.throws(
+    () =>
+      produceRuntimeArtifact({
+        ...options,
+        outputDirectory: path.join(alias, "new-parent", "runtime"),
+      }),
+    { code: "ENOENT" },
+  );
+  assert.equal(mkdir.mock.callCount(), 0);
+  assert.equal(fs.existsSync(destination), false);
+  assert.deepEqual(fs.readdirSync(root).sort(), before);
 });
 
 function committedFixture(t) {
