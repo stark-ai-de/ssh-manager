@@ -4,14 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SSHManager } from "../dist/index.js";
-import {
-  operator,
-  agent,
-  allCapabilities,
-  configuredManager,
-  sshFixture,
-  until,
-} from "./fixture.mjs";
+import { operator, agent, managedFixture } from "./fixture.mjs";
 
 test("supported metadata migration preserves rollback bytes and unsupported versions are untouched", (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ssh-state-contract-"));
@@ -56,12 +49,7 @@ test("corrupt persisted PTY dimensions and concurrent state owners are rejected 
   assert.ok(!fs.existsSync(path.join(directory, "owner.json")));
 });
 test("credential revisions invalidate granted targets without leaking updated secrets", async (t) => {
-  const fixture = await sshFixture();
-  const ctx = await configuredManager(fixture);
-  t.after(async () => {
-    ctx.close();
-    await fixture.close();
-  });
+  const ctx = await managedFixture(t);
   await ctx.manager.openConnection(agent, ctx.profile.id);
   assert.throws(
     () =>

@@ -210,6 +210,17 @@ export const outputs = {
     limits: z.record(z.string(), z.number()),
   }),
 } satisfies Record<Operation, z.ZodType>;
+/** Wire inputs may be wider than canonical handler results; preserve those accepted meanings. */
+export type OperationResultInputs = { [K in Operation]: z.input<(typeof outputs)[K]> };
+export type OperationResults = { [K in Operation]: z.output<(typeof outputs)[K]> };
 export function resultSchema(operation: Operation) {
   return z.strictObject({ data: outputs[operation] });
+}
+/** Validate the wire envelope before exposing data with its operation-specific type. */
+export function parseOperationResult<K extends Operation>(
+  operation: K,
+  response: unknown,
+): OperationResults[K] {
+  // Selection by the same operation key establishes this correlation; no schema is widened.
+  return resultSchema(operation).parse(response).data as OperationResults[K];
 }

@@ -1,7 +1,7 @@
-import { fault, type ProfileInput } from "./contracts.js";
+import { fault } from "./contracts.js";
 
 export type ImportPreview = {
-  profiles: ProfileInput[];
+  profiles: { name: string; host: string; username: string; port: number }[];
   warnings: { line: number; directive: string }[];
 };
 /** Parse text only: never execute ProxyCommand, expand Include, read keys or silently import trust. */
@@ -29,7 +29,7 @@ export function previewSshConfig(text: string): ImportPreview {
       if (!(directive in block.values)) block.values[directive] = value;
     } else warnings.push({ line: index + 1, directive });
   }
-  const profiles: ProfileInput[] = [];
+  const profiles: ImportPreview["profiles"] = [];
   for (const { aliases, values } of blocks)
     for (const alias of aliases) {
       const port = Number(values.port ?? 22);

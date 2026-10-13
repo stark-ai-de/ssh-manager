@@ -152,7 +152,7 @@ export class SSHManager extends EventEmitter {
   private audited<T extends object>(service: T, scope: string, operations: string[]): T {
     return new Proxy(service, {
       get: (target, key) => {
-        const value = Reflect.get(target, key);
+        const value = target[key as keyof T];
         if (typeof value !== "function") return value;
         if (!operations.includes(String(key))) return value.bind(target);
         return (actor: Actor, ...args: unknown[]) => {
@@ -353,7 +353,7 @@ export class SSHManager extends EventEmitter {
     return { completed: true };
   }
   exportProfiles(actor: Actor) {
-    return { schema: 1, profiles: this.profiles(actor) };
+    return { schema: 1 as const, profiles: this.profiles(actor) };
   }
   previewImport(_actor: Actor, text: string) {
     return previewSshConfig(text);

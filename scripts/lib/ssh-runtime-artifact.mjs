@@ -2,6 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 
+export const runtimeArtifactFormat = Object.freeze({
+  schemaVersion: 1,
+  managementApiVersion: "v1",
+  nodeMinimum: "24.18.0",
+  sourceRepository: "https://github.com/stark-ai-de/ssh-manager",
+});
+export const runtimeArtifactLimits = Object.freeze({
+  manifestBytes: 1024 * 1024,
+  files: 4096,
+  fileBytes: 64 * 1024 * 1024,
+});
 export const requiredRuntimeFiles = [
   "mcp.mjs",
   "daemon.mjs",
@@ -22,7 +33,14 @@ const revision = /^[a-f0-9]{40}$/;
 const fail = (message) => {
   throw new Error(message);
 };
-function regularFile(file, maximum = 64 * 1024 * 1024) {
+function parseManifest(bytes) {
+  try {
+    return JSON.parse(bytes);
+  } catch {
+    fail("Artifact manifests must contain valid JSON.");
+  }
+}
+function regularFile(file, maximum = runtimeArtifactLimits.fileBytes) {
   const before = fs.lstatSync(file);
   if (!before.isFile() || before.isSymbolicLink() || before.size > maximum)
     fail("Artifact must contain bounded regular files only.");
@@ -57,16 +75,19 @@ export function verifyRuntimeArtifact(directory, { manifestSha256, sourceCommit 
   const root = path.resolve(directory);
   const stat = fs.lstatSync(root);
   if (!stat.isDirectory() || stat.isSymbolicLink()) fail("Artifact root must be a real directory.");
-  const bytes = regularFile(path.join(root, "ARTIFACT-MANIFEST.json"), 1024 * 1024);
+  const bytes = regularFile(
+    path.join(root, "ARTIFACT-MANIFEST.json"),
+    runtimeArtifactLimits.manifestBytes,
+  );
   if (sha256(bytes) !== manifestSha256)
     fail("Artifact manifest digest does not match the trusted pin.");
-  const manifest = JSON.parse(bytes);
+  const manifest = parseManifest(bytes);
   if (
     !manifest ||
-    manifest.schemaVersion !== 1 ||
-    manifest.managementApiVersion !== "v1" ||
-    manifest.nodeMinimum !== "24.18.0" ||
-    manifest.sourceRepository !== "https://github.com/stark-ai-de/ssh-manager" ||
+    manifest.schemaVersion !== runtimeArtifactFormat.schemaVersion ||
+    manifest.managementApiVersion !== runtimeArtifactFormat.managementApiVersion ||
+    manifest.nodeMinimum !== runtimeArtifactFormat.nodeMinimum ||
+    manifest.sourceRepository !== runtimeArtifactFormat.sourceRepository ||
     typeof manifest.sourceCommit !== "string" ||
     !revision.test(manifest.sourceCommit) ||
     typeof manifest.runtimeVersion !== "string" ||
@@ -75,7 +96,7 @@ export function verifyRuntimeArtifact(directory, { manifestSha256, sourceCommit 
     !digest.test(manifest.buildManifestSha256) ||
     !Array.isArray(manifest.files) ||
     manifest.files.length === 0 ||
-    manifest.files.length > 4096
+    manifest.files.length > runtimeArtifactLimits.files
   )
     fail("Unsupported or malformed artifact manifest.");
   if (sourceCommit !== undefined && manifest.sourceCommit !== sourceCommit)
@@ -93,7 +114,7 @@ export function verifyRuntimeArtifact(directory, { manifestSha256, sourceCommit 
       entry.path <= previous ||
       !Number.isSafeInteger(entry.size) ||
       entry.size < 0 ||
-      entry.size > 64 * 1024 * 1024 ||
+      entry.size > runtimeArtifactLimits.fileBytes ||
       typeof entry.sha256 !== "string" ||
       !digest.test(entry.sha256)
     )
@@ -133,10 +154,13 @@ export function verifyRuntimeArtifact(directory, { manifestSha256, sourceCommit 
   }
   walk();
   if (seen.size !== files.size) fail("Artifact inventory contains missing files.");
-  const buildBytes = regularFile(path.join(root, "BUILD-MANIFEST.json"), 1024 * 1024);
+  const buildBytes = regularFile(
+    path.join(root, "BUILD-MANIFEST.json"),
+    runtimeArtifactLimits.manifestBytes,
+  );
   if (sha256(buildBytes) !== manifest.buildManifestSha256)
     fail("Build manifest digest does not match artifact metadata.");
-  const build = JSON.parse(buildBytes);
+  const build = parseManifest(buildBytes);
   if (
     build.schemaVersion !== 1 ||
     build.nodeMinimum !== manifest.nodeMinimum ||
@@ -145,7 +169,9 @@ export function verifyRuntimeArtifact(directory, { manifestSha256, sourceCommit 
     fail("Unsupported build manifest metadata.");
   // Detect a concurrent manifest replacement too; verify only an immutable, privately staged tree.
   if (
-    sha256(regularFile(path.join(root, "ARTIFACT-MANIFEST.json"), 1024 * 1024)) !== manifestSha256
+    sha256(
+      regularFile(path.join(root, "ARTIFACT-MANIFEST.json"), runtimeArtifactLimits.manifestBytes),
+    ) !== manifestSha256
   )
     fail("Artifact manifest changed during verification.");
   return {

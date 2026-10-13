@@ -41,6 +41,12 @@ The loopback API validates authentication, Host and browser Origin. A bootstrap 
 
 An embedded application can instantiate the library without HTTP/MCP and own its lifecycle. It must use an independent state directory and authenticate its own actors. Simultaneous embedders must not own the same state directory, and must not compete with the daemon for its state. Boundary and public-declaration tests enforce the package dependency direction.
 
+## Operation-result agreement
+
+The runtime's result-contract module owns successful wire shapes and the typed client's decoded result declarations. Its interface supplies schema discovery and operation-specific reply parsing. HTTP validates handler output, the client validates successful replies, and MCP advertises the same schemas. Handler declarations are checked against schema inputs during the build; this is assignability, not equality. Canonical results may be narrower than accepted wire results—for example, canonical jobs omit an unavailable exit code while the wire contract also accepts `null`.
+
+This seam keeps transport meaning out of canonical management and gives result changes locality. Client declaration graphs no longer depend on handler inference. A malformed successful operation reply raises a sanitized `API_RESPONSE` error without schema details or replay. Remote errors, registration, heartbeat and streaming transfers retain their separate behavior. Validation establishes shape agreement, not publisher identity, remote termination or terminal continuity.
+
 ## From human approval to a remote operation
 
 ```mermaid

@@ -4,12 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { createHash } from "node:crypto";
 import { SSHManager } from "../dist/index.js";
 import { runApprovedCommand } from "../examples/embedded.mjs";
 import {
   sshFixture,
-  configuredManager,
+  managedFixture,
   operator,
   agent,
   vaultPassword,
@@ -19,18 +18,14 @@ import {
 } from "./fixture.mjs";
 
 const strip = (profile) => {
-  const { id, revision, ...data } = profile;
+  const { id: _id, revision: _revision, ...data } = profile;
   return data;
 };
 test("unknown, changed and revoked keys fail closed without editing known_hosts", async (t) => {
-  const fixture = await sshFixture(),
-    different = await sshFixture();
-  const ctx = await configuredManager(fixture);
-  t.after(async () => {
-    ctx.close();
-    await fixture.close();
-    await different.close();
-  });
+  const ctx = await managedFixture(t);
+  const { fixture } = ctx;
+  const different = await sshFixture();
+  t.after(different.close);
   const profile = ctx.manager.createProfile(operator, { ...strip(ctx.profile), name: "unknown" });
   ctx.manager.setGrants(operator, profile.id, 1, allCapabilities);
   await assert.rejects(ctx.manager.openConnection(agent, profile.id), { code: "HOST_KEY_UNKNOWN" });
@@ -82,14 +77,9 @@ test("unknown, changed and revoked keys fail closed without editing known_hosts"
   await assert.rejects(manager.openConnection(agent, host.id), { code: "HOST_KEY_REVOKED" });
 });
 test("plain PTYs are lost after restart; tmux fault fixture restores only an existing remote session", async (t) => {
-  const fixture = await sshFixture({ tmux: true });
-  const ctx = await configuredManager(fixture);
+  const ctx = await managedFixture(t, { ssh: { tmux: true } });
+  const { fixture } = ctx;
   let manager = ctx.manager;
-  t.after(async () => {
-    manager.shutdown();
-    fs.rmSync(ctx.directory, { recursive: true, force: true });
-    await fixture.close();
-  });
   const plain = await manager.sessions.create(agent, ctx.profile.id);
   const persistent = await manager.sessions.create(agent, ctx.profile.id, { tmux: true });
   await manager.sessions.attach(agent, persistent.id);
@@ -107,8 +97,7 @@ test("plain PTYs are lost after restart; tmux fault fixture restores only an exi
   await until(() => manager.sessions.read(agent, plain.id).session.state === "lost");
   assert.equal(manager.sessions.read(agent, persistent.id).session.state, "recoverable");
   await manager.sessions.recover(agent, persistent.id);
-  manager.shutdown();
-  manager = new SSHManager({ stateDirectory: ctx.directory, knownHosts: [] });
+  manager = ctx.restart();
   assert.equal(manager.sessions.read(agent, plain.id).session.state, "lost");
   assert.equal(manager.sessions.read(agent, persistent.id).session.state, "recoverable");
   await assert.rejects(manager.sessions.recover(agent, persistent.id), { code: "VAULT_LOCKED" });
@@ -127,13 +116,8 @@ test("plain PTYs are lost after restart; tmux fault fixture restores only an exi
   assert.equal(manager.sessions.read(agent, persistent.id).session.state, "recoverable");
 });
 test("pool wait cancellation, group partial errors, recordings and independent embedding", async (t) => {
-  const fixture = await sshFixture();
-  const ctx = await configuredManager(fixture, {
+  const ctx = await managedFixture(t, {
     limits: { connections: 1, perTarget: 1, channels: 1, waiters: 1, outputBytes: 4096 },
-  });
-  t.after(async () => {
-    ctx.close();
-    await fixture.close();
   });
   const { manager, profile } = ctx;
   const terminal = await manager.sessions.create(agent, profile.id, { recording: true });
@@ -176,15 +160,13 @@ test("pool wait cancellation, group partial errors, recordings and independent e
   assert.equal(embedded.job.exitCode, 0);
 });
 test("flat jump chains and both configured proxy protocols authenticate through verified hops", async (t) => {
-  const first = await sshFixture(),
-    final = await sshFixture();
-  const ctx = await configuredManager(first);
+  const ctx = await managedFixture(t);
+  const first = ctx.fixture;
+  const final = await sshFixture();
+  t.after(final.close);
   const proxies = [];
   t.after(async () => {
-    ctx.close();
     for (const p of proxies) await p.close();
-    await first.close();
-    await final.close();
   });
   const target = ctx.manager.createProfile(operator, {
     ...strip(ctx.profile),

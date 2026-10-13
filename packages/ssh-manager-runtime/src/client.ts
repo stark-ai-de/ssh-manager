@@ -1,5 +1,6 @@
 import type { Operation, OperationInputs } from "./catalog.js";
-import type { OperationResults } from "./handlers.js";
+import { parseOperationResult, type OperationResults } from "./outputs.js";
+export type { OperationResults } from "./outputs.js";
 
 export class APIError extends Error {
   constructor(
@@ -26,7 +27,15 @@ function progressStream(progress?: (bytes: number) => void) {
   });
 }
 export function assertLoopback(url: string) {
-  const parsed = new URL(url);
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new APIError(
+      "INVALID_ENDPOINT",
+      "Management API must be authenticated local loopback HTTP.",
+    );
+  }
   if (
     parsed.protocol !== "http:" ||
     !["127.0.0.1", "[::1]"].includes(parsed.hostname) ||
@@ -117,7 +126,13 @@ export class ManagementClient {
     args: OperationInputs[K],
     options: { signal?: AbortSignal; timeout?: number } = {},
   ): Promise<OperationResults[K]> {
-    return (await this.request(`/v1/${operation}`, args, options)).data;
+    const response = await this.request(`/v1/${operation}`, args, options);
+    try {
+      return parseOperationResult(operation, response);
+    } catch {
+      // Schema issues may contain remote values; do not expose them or retry the operation.
+      throw new APIError("API_RESPONSE", "Management API returned an invalid operation result.");
+    }
   }
   async download(targetId: string, path: string, input?: AbortSignal | TransferOptions) {
     const options = transferOptions(input);

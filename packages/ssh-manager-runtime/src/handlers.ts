@@ -1,7 +1,11 @@
 import { Readable } from "node:stream";
 import type { SSHManager, Actor } from "@stark-ai/ssh-manager";
 import type { OperationInputs, Operation } from "./catalog.js";
+import type { OperationResultInputs } from "./outputs.js";
 type Arg<K extends Operation> = OperationInputs[K];
+export type OperationHandlers = {
+  [K in Operation]: (a: Arg<K>) => OperationResultInputs[K] | Promise<OperationResultInputs[K]>;
+};
 export function handlers(manager: SSHManager, actor: Actor, signal?: AbortSignal) {
   return {
     ssh_hosts_list: (a: Arg<"ssh_hosts_list">) => manager.profiles(actor, a),
@@ -104,8 +108,6 @@ export function handlers(manager: SSHManager, actor: Actor, signal?: AbortSignal
       manager.tunnels.reconnect(actor, a.tunnelId, signal),
     ssh_audit_read: (a: Arg<"ssh_audit_read">) => manager.audit(actor, a.cursor),
     ssh_diagnose: (a: Arg<"ssh_diagnose">) => manager.diagnose(actor, a.targetId),
-  } satisfies { [K in Operation]: (a: Arg<K>) => unknown };
+  } satisfies OperationHandlers;
 }
-export type OperationResults = {
-  [K in Operation]: Awaited<ReturnType<ReturnType<typeof handlers>[K]>>;
-};
+export type { OperationResults } from "./outputs.js";

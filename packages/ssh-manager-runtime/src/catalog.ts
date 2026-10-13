@@ -374,4 +374,4 @@ export const catalog = {
 } as const;
 export type Operation = keyof typeof catalog;
 export type OperationInputs = { [K in Operation]: z.input<(typeof catalog)[K]["schema"]> };
-export { resultSchema } from "./outputs.js";
+export { resultSchema, parseOperationResult, type OperationResults } from "./outputs.js";
