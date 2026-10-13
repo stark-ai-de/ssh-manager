@@ -246,12 +246,12 @@ The performance step adds **78 test lines and zero net production lines** to the
 
 | PR category    | Base lines | Final lines | Added   | Deleted | Net      |
 | -------------- | ---------- | ----------- | ------- | ------- | -------- |
-| production     | 6,058      | 5,990       | 128     | 196     | -68      |
+| production     | 6,058      | 5,990       | 127     | 195     | -68      |
 | tests/fixtures | 3,636      | 3,780       | 177     | 33      | +144     |
 | examples       | 44         | 44          | 0       | 0       | +0       |
 | scripts        | 931        | 931         | 0       | 0       | +0       |
 | docs/config    | 2,044      | 2,341       | 297     | 0       | +297     |
 | lockfile       | 1,594      | 1,594       | 0       | 0       | +0       |
-| **All source** | **14,307** | **14,680**  | **602** | **229** | **+373** |
+| **All source** | **14,307** | **14,680**  | **601** | **228** | **+373** |
 
 Counts include all tracked and non-ignored source additions, including the ADR, this specification, changelog and regression tests. Generated builds/dependencies, isolated worktree copies and temporary validation snapshots/harnesses are outside maintained-source accounting, consistently with the initial inventory. The existing four dependency edits are preserved in the original workspace; they are absent from the PR diff. Public declarations, package exports, security/lifecycle contracts and runtime adapters retain the validated behavior. The changes are ready for the requested PR; publication, merge and live operations remain outside scope.
