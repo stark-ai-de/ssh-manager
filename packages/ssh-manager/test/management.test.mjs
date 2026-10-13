@@ -6,14 +6,12 @@ import path from "node:path";
 import net from "node:net";
 import { Readable } from "node:stream";
 import { createHmac } from "node:crypto";
-import { SSHManager } from "../dist/index.js";
 import { Vault } from "../dist/vault.js";
 import { knownHostMatches } from "../dist/trust.js";
 import { OutputBuffer } from "../dist/util.js";
 import { proxySocket } from "../dist/proxy.js";
 import {
-  sshFixture,
-  configuredManager,
+  managedFixture,
   operator,
   agent,
   second,
@@ -71,13 +69,8 @@ test("known_hosts patterns, hashed names and output cursors are bounded", () => 
   assert.throws(() => buffer.page(100), { code: "INVALID_CURSOR" });
 });
 test("permissions, explicit trust, connection reuse and profile revisions apply to the direct library", async (t) => {
-  const fixture = await sshFixture();
-  const ctx = await configuredManager(fixture);
-  t.after(async () => {
-    ctx.close();
-    await fixture.close();
-  });
-  const { manager, profile } = ctx;
+  const ctx = await managedFixture(t);
+  const { fixture, manager, profile } = ctx;
   assert.throws(() => manager.setGrants(agent, profile.id, 1, allCapabilities), {
     code: "FORBIDDEN",
   });
@@ -125,17 +118,12 @@ test("permissions, explicit trust, connection reuse and profile revisions apply 
   assert.ok(!JSON.stringify(manager.audit(agent)).includes(password));
 });
 const strip = (profile) => {
-  const { id, revision, ...input } = profile;
+  const { id: _id, revision: _revision, ...input } = profile;
   return input;
 };
 test("jobs, readers, writer authority, detach and vault lock retain truthful lifecycles", async (t) => {
-  const fixture = await sshFixture();
-  const ctx = await configuredManager(fixture);
-  t.after(async () => {
-    ctx.close();
-    await fixture.close();
-  });
-  const { manager, profile } = ctx;
+  const ctx = await managedFixture(t);
+  const { fixture, manager, profile } = ctx;
   const job = await manager.jobs.start(agent, profile.id, "test-command");
   await until(() => manager.jobs.read(agent, job.id).job.state !== "running");
   assert.equal(manager.jobs.read(agent, job.id).job.exitCode, 0);
@@ -169,12 +157,7 @@ test("jobs, readers, writer authority, detach and vault lock retain truthful lif
   assert.equal(manager.jobs.read(agent, job.id).job.state, "succeeded");
 });
 test("SFTP streaming, metadata, mutation and root containment", async (t) => {
-  const fixture = await sshFixture();
-  const ctx = await configuredManager(fixture);
-  t.after(async () => {
-    ctx.close();
-    await fixture.close();
-  });
+  const ctx = await managedFixture(t);
   const { manager, profile } = ctx;
   assert.equal((await manager.files.list(agent, profile.id, "/allowed"))[0].name, "hello.txt");
   assert.equal(
@@ -206,15 +189,10 @@ test("SFTP streaming, metadata, mutation and root containment", async (t) => {
   await manager.files.mutate(agent, profile.id, "remove", "/allowed/new", { directory: true });
 });
 test("local, remote and SOCKS tunnels close their listeners; occupied ports fail without crashing", async (t) => {
-  const fixture = await sshFixture();
-  const ctx = await configuredManager(fixture);
+  const ctx = await managedFixture(t);
   const echo = net.createServer((s) => s.pipe(s));
+  t.after(() => new Promise((r) => echo.close(r)));
   await new Promise((r) => echo.listen(0, "127.0.0.1", r));
-  t.after(async () => {
-    ctx.close();
-    await fixture.close();
-    await new Promise((r) => echo.close(r));
-  });
   const destinationPort = echo.address().port;
   for (const kind of ["local", "remote", "socks"]) {
     const tunnel = await ctx.manager.tunnels.create(agent, ctx.profile.id, {
@@ -252,22 +230,15 @@ test("local, remote and SOCKS tunnels close their listeners; occupied ports fail
   );
 });
 test("channel deadlines, concurrent profile invalidation and bounded pool waiters", async (t) => {
-  const fixture = await sshFixture({ hangShell: true, hangSftp: true });
-  const ctx = await configuredManager(fixture, { limits: { channelTimeout: 150 } });
-  t.after(async () => {
-    ctx.close();
-    await fixture.close();
+  const ctx = await managedFixture(t, {
+    ssh: { hangShell: true, hangSftp: true },
+    limits: { channelTimeout: 150 },
   });
   await assert.rejects(ctx.manager.sessions.create(agent, ctx.profile.id), { code: "TIMEOUT" });
   await assert.rejects(ctx.manager.files.list(agent, ctx.profile.id, "/allowed"), {
     code: "TIMEOUT",
   });
-  const delayed = await sshFixture({ authDelay: 120 });
-  const other = await configuredManager(delayed);
-  t.after(async () => {
-    other.close();
-    await delayed.close();
-  });
+  const other = await managedFixture(t, { ssh: { authDelay: 120 } });
   const attempt = other.manager.openConnection(agent, other.profile.id);
   await delay(30);
   other.manager.updateProfile(operator, other.profile.id, 1, {

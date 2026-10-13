@@ -45,6 +45,10 @@ Mermaid diagrams must also be inspected in a GitHub-compatible renderer when cha
 
 Existing fixtures cover host verification, grants, credential/vault failure cases, state migration/ownership, jobs, PTY loss/recovery, file roots, tunnels, API authentication/origins and MCP setup exclusions. Architecture tests guard package dependency direction and deterministic bundled source ownership.
 
+Synthetic direct-management tests use a managed SSH fixture lifetime for failure-safe acquisition and ordered release. Lifecycle fixtures cover constructor/vault/trust/grant setup failure, registration and listen failure, partial cleanup failure, repeated release and tracking a replacement manager. Cleanup attempts remaining owned resources before reporting aggregated failures; repeated release observes the same outcome rather than silently retrying. Native and runtime/browser resources retain separate ownership.
+
+Operation-result fixtures check catalog/schema coverage, preserved nullable and optional wire meanings, shared parser/client behavior, malformed envelopes and result fields, sanitized errors and no operation replay. Compile-only fixtures verify schema-derived client results for every operation and reject incompatible synchronous/asynchronous handler results. Existing runtime/MCP fixtures continue to check authenticated roles, writer identity and discovery; these checks are not live target qualification.
+
 New consumer-verifier fixtures reject missing pins, wrong revisions, missing/extra/modified files, unexpected directories, unsafe/duplicate/unsorted paths, invalid metadata and symlinks. Documentation-checker fixtures cover missing targets/anchors, traversal, invalid JSON and duplicate YAML keys. First-connection JSON examples are validated against the actual operation schemas; the typed-client example runs against an isolated runtime.
 
 ## Reporting results

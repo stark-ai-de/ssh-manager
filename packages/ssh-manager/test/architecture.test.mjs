@@ -71,6 +71,7 @@ test("runtime bundles are reproducible from isolated canonical sources without c
       "pnpm-lock.yaml",
       "pnpm-workspace.yaml",
       "scripts/lib/ssh-runtime-bundle.mjs",
+      "scripts/lib/ssh-runtime-artifact.mjs",
     ]) {
       fs.mkdirSync(path.dirname(path.join(candidate, file)), { recursive: true });
       fs.copyFileSync(path.join(root, file), path.join(candidate, file));

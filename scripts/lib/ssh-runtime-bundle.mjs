@@ -3,11 +3,24 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { buildSync } from "esbuild";
+import { runtimeArtifactFormat } from "./ssh-runtime-artifact.mjs";
 
 const packages = ["ssh-manager", "ssh-manager-runtime", "ssh-manager-mcp"];
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+function dependencyManifest(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    throw new Error("Dependency package metadata could not be read as valid JSON.");
+  }
+}
 export function runtimeSourceFiles(root) {
-  const files = ["pnpm-lock.yaml", "pnpm-workspace.yaml", "scripts/lib/ssh-runtime-bundle.mjs"];
+  const files = [
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "scripts/lib/ssh-runtime-bundle.mjs",
+    "scripts/lib/ssh-runtime-artifact.mjs",
+  ];
   function walk(relative) {
     for (const entry of fs.readdirSync(path.join(root, relative), { withFileTypes: true })) {
       if (entry.isSymbolicLink()) throw new Error("Runtime source may not contain symbolic links.");
@@ -89,7 +102,7 @@ export function buildRuntimeBundle({ root, output, dependencyRoot = root }) {
       )
         directory = path.dirname(directory);
       if (!fs.existsSync(path.join(directory, "package.json"))) continue;
-      const manifest = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8"));
+      const manifest = dependencyManifest(path.join(directory, "package.json"));
       if (!manifest.name || manifest.name.startsWith("@stark-ai/")) continue;
       const licenses = fs
         .readdirSync(directory)
@@ -121,9 +134,7 @@ export function buildRuntimeBundle({ root, output, dependencyRoot = root }) {
   ]) {
     const file = require.resolve(source);
     fs.copyFileSync(file, path.join(viewer, name));
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(path.dirname(file), "../package.json"), "utf8"),
-    );
+    const manifest = dependencyManifest(path.join(path.dirname(file), "../package.json"));
     const directory = path.resolve(path.dirname(file), "..");
     dependencies.set(`${manifest.name}@${manifest.version}`, {
       name: manifest.name,
@@ -144,7 +155,7 @@ export function buildRuntimeBundle({ root, output, dependencyRoot = root }) {
     JSON.stringify(
       {
         schemaVersion: 1,
-        nodeMinimum: "24.18.0",
+        nodeMinimum: runtimeArtifactFormat.nodeMinimum,
         nativeAddons: false,
         inputs,
         entrySources,
