@@ -192,9 +192,9 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
             throw new APIError("NOT_CONNECTED", "MCP owner is closed.");
           }
           const server = createMcpServer(client, {
-            beforeCall: async (operation, context) => {
+            beforeCall: async (operation, context, args) => {
               if (closed) throw new APIError("NOT_CONNECTED", "MCP owner is closed.");
-              await options.beforeCall?.(operation, context);
+              await options.beforeCall?.(operation, context, args);
               await client.connect({ signal: context.mcpReq.signal, joinPhysical: true });
               if (closed || client.registration?.kind !== "agent")
                 throw new APIError("FORBIDDEN", "MCP requires a registered agent client.");

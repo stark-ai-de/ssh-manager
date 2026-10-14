@@ -1,9 +1,18 @@
 import { McpServer, type ServerContext } from "@modelcontextprotocol/server";
-import { catalog, resultSchema, type Operation } from "@stark-ai/ssh-manager-runtime/catalog";
+import {
+  catalog,
+  resultSchema,
+  type Operation,
+  type OperationInputs,
+} from "@stark-ai/ssh-manager-runtime/catalog";
 import { APIError, type ManagementClient } from "@stark-ai/ssh-manager-runtime/client";
 
 export interface McpIntegrationOptions {
-  beforeCall?: (operation: Operation, context: ServerContext) => Promise<void>;
+  beforeCall?: (
+    operation: Operation,
+    context: ServerContext,
+    args: OperationInputs[Operation],
+  ) => Promise<void>;
   onCleanupError?: () => void;
 }
 export function createMcpServer(client: ManagementClient, options: McpIntegrationOptions = {}) {
@@ -23,7 +32,7 @@ export function createMcpServer(client: ManagementClient, options: McpIntegratio
       },
       async (args: any, context: ServerContext) => {
         try {
-          await options.beforeCall?.(name as Operation, context);
+          await options.beforeCall?.(name as Operation, context, args);
           const structuredContent = {
             data: await client.call(name as Operation, args, {
               signal: context.mcpReq.signal,
