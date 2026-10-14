@@ -1,4 +1,5 @@
-import { request } from "node:http";
+import { Agent, request } from "node:http";
+import { createConnection } from "node:net";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import { Readable, Transform } from "node:stream";
@@ -188,6 +189,7 @@ export function createClientTransport(
       let sent = false;
       let responseComplete = false;
       let req: ClientRequest | undefined;
+      let agent: Agent | undefined;
       let socket: Socket | undefined;
       let uploadSource: Readable | undefined;
       let downloadSink: Transform | undefined;
@@ -223,6 +225,7 @@ export function createClientTransport(
         downloadSink?.destroy(error);
         uploadSource?.destroy(error);
         req?.destroy();
+        agent?.destroy();
         socket?.destroy();
       };
       const cancel = () => fail("CANCELLED_OR_TIMEOUT");
@@ -286,16 +289,34 @@ export function createClientTransport(
             responseReject = no;
           });
           void responseReady.catch(() => {});
+          // One fresh agent per exchange; never reused or shared. Keep its one socket alive
+          // through post-response native proof, then join actual close before refunding admission.
+          agent = new Agent({ keepAlive: true, maxSockets: 1, maxFreeSockets: 1 });
+          agent.createConnection = () => {
+            const actual = createConnection({
+              host: endpoint.hostname === "[::1]" ? "::1" : endpoint.hostname,
+              port: Number(endpoint.port || "80"),
+            });
+            socket = actual;
+            socketClose = new Promise<void>((done) =>
+              actual.once("close", () => {
+                if (uploadSource && !uploadSource.readableEnded)
+                  uploadSource.destroy(new ClientTransportError("API_UNAVAILABLE", sent));
+                done();
+              }),
+            );
+            return actual;
+          };
           req = request(
             {
               hostname: endpoint.hostname === "[::1]" ? "::1" : endpoint.hostname,
               port: endpoint.port,
               path: input.path,
               method: input.method,
-              agent: false,
+              agent,
               headers: {
                 authorization: `Bearer ${input.token}`,
-                connection: "close",
+                connection: "keep-alive",
                 ...(input.method === "GET"
                   ? {}
                   : {
@@ -310,14 +331,10 @@ export function createClientTransport(
           const connected = await new Promise<Socket>((yes, no) => {
             req!.once("error", no);
             req!.once("socket", (actual) => {
-              socket = actual;
-              socketClose = new Promise<void>((done) => {
-                actual.once("close", () => {
-                  if (uploadSource && !uploadSource.readableEnded)
-                    uploadSource.destroy(new ClientTransportError("API_UNAVAILABLE", sent));
-                  done();
-                });
-              });
+              if (actual !== socket) {
+                no(new ClientTransportError("API_RESPONSE", false));
+                return;
+              }
               actual.once("error", no);
               if (!actual.connecting) yes(actual);
               else actual.once("connect", () => yes(actual));
@@ -434,6 +451,10 @@ export function createClientTransport(
             await input.authority?.afterResponse(connected);
             input.authority?.assertCurrent();
             if (resultEnded) throw new ClientTransportError("CANCELLED_OR_TIMEOUT", true);
+            // A complete response cannot certify an unfinished input stream. Stop it now,
+            // after peer proof, and retain physical admission through its actual cancellation.
+            if (uploadSource && !uploadSource.readableEnded)
+              throw new ClientTransportError("API_RESPONSE", true);
             await upload;
             input.authority?.assertCurrent();
             if (resultEnded) throw new ClientTransportError("CANCELLED_OR_TIMEOUT", true);
@@ -445,6 +466,7 @@ export function createClientTransport(
           fail(error instanceof ClientTransportError ? error.code : "API_UNAVAILABLE");
         } finally {
           req?.destroy();
+          agent?.destroy();
           socket?.destroy();
           uploadSource?.destroy();
           await Promise.all([socketClose, uploadClose, upload?.catch(() => {})]);

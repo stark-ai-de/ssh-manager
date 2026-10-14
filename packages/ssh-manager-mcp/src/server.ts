@@ -8,6 +8,13 @@ import {
 import { APIError, type ManagementClient } from "@stark-ai/ssh-manager-runtime/client";
 
 export interface McpIntegrationOptions {
+  /** Trusted embedding may apply scoped policy while retaining canonical tool/schema/transport ownership. */
+  invoke?: (
+    operation: Operation,
+    context: ServerContext,
+    args: OperationInputs[Operation],
+    client: ManagementClient,
+  ) => Promise<unknown>;
   beforeCall?: (
     operation: Operation,
     context: ServerContext,
@@ -34,10 +41,12 @@ export function createMcpServer(client: ManagementClient, options: McpIntegratio
         try {
           await options.beforeCall?.(name as Operation, context, args);
           const structuredContent = {
-            data: await client.call(name as Operation, args, {
-              signal: context.mcpReq.signal,
-              joinPhysical: true,
-            }),
+            data: options.invoke
+              ? await options.invoke(name as Operation, context, args, client)
+              : await client.call(name as Operation, args, {
+                  signal: context.mcpReq.signal,
+                  joinPhysical: true,
+                }),
           };
           return {
             structuredContent,

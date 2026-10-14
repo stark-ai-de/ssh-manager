@@ -172,3 +172,128 @@ test("canonical beforeCall sees validated arguments before any creating registra
   assert.equal(requests, 2);
   await handle.close();
 });
+
+// Real official SDK dispatch. Delayed embedding invocation proves queue/cleanup ownership only,
+// not native receipts, SSH or the unreleased message-completion capability.
+test("scoped invocation limits work to two and retains close through invocation and embedding cleanup", async () => {
+  const pending = new Map(),
+    started = [],
+    leaves = [];
+  let active = 0,
+    peak = 0,
+    releaseCleanup;
+  const cleanup = new Promise((resolve) => {
+    releaseCleanup = resolve;
+  });
+  let cleanupStarted = false;
+  const client = new ManagementClient("http://127.0.0.1:1", "b".repeat(43), {
+    automaticHeartbeat: false,
+  });
+  const wire = {
+    async start() {},
+    async close() {},
+    async send(message) {
+      const resolve = pending.get(message.id);
+      if (resolve) {
+        pending.delete(message.id);
+        resolve(message);
+      }
+    },
+  };
+  const handle = serveManagementStdio({
+    transport: wire,
+    createClient: () => client,
+    work: { maxCalls: 2, maxWaiting: 8 },
+    async invoke(operation, context, args, actual) {
+      assert.equal(actual, client);
+      assert.equal(operation, "ssh_hosts_list");
+      started.push(args.search);
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => leaves.push(resolve));
+      active--;
+      return [];
+    },
+    async closeClient(actual) {
+      assert.equal(actual, client);
+      cleanupStarted = true;
+      await cleanup;
+      await actual.close();
+    },
+  });
+  const send = (id, method, params) =>
+    new Promise((resolve) => {
+      pending.set(id, resolve);
+      wire.onmessage({ jsonrpc: "2.0", id, method, params });
+    });
+  await send(1, "initialize", {
+    protocolVersion: "2025-11-25",
+    capabilities: {},
+    clientInfo: { name: "scoped-owner", version: "1" },
+  });
+  wire.onmessage({ jsonrpc: "2.0", method: "notifications/initialized" });
+  const calls = [2, 3, 4].map((id) =>
+    send(id, "tools/call", { name: "ssh_hosts_list", arguments: { search: String(id) } }),
+  );
+  for (let index = 0; index < 4; index++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(active, 2);
+  assert.equal(started.length, 2);
+  assert.equal(peak, 2);
+  leaves.shift()();
+  await calls[0];
+  for (let index = 0; index < 2; index++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(started.length, 3);
+  assert.equal(active, 2);
+  let done = false;
+  const closed = handle.close().then(() => {
+    done = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(done, false);
+  for (const resolve of leaves.splice(0)) resolve();
+  for (let index = 0; index < 4; index++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(cleanupStarted, true);
+  assert.equal(done, false);
+  releaseCleanup();
+  await closed;
+  assert.equal(done, true);
+  assert.equal(peak, 2);
+});
+
+test("incomplete work policies deny before transport or client work", () => {
+  for (const work of [
+    {},
+    { maxCalls: 2 },
+    { maxWaiting: 8 },
+    { maxCalls: 2, maxWaiting: 0 },
+    { maxCalls: NaN, maxWaiting: 8 },
+  ]) {
+    let starts = 0,
+      factories = 0,
+      invocations = 0;
+    const wire = {
+      async start() {
+        starts++;
+      },
+      async close() {},
+      async send() {},
+    };
+    assert.throws(
+      () =>
+        serveManagementStdio({
+          transport: wire,
+          work,
+          createClient() {
+            factories++;
+            throw new Error("unreachable");
+          },
+          async invoke() {
+            invocations++;
+            return [];
+          },
+        }),
+      (e) => e.code === "INVALID_ARGUMENT",
+    );
+    assert.deepEqual([starts, factories, invocations], [0, 0, 0]);
+  }
+});

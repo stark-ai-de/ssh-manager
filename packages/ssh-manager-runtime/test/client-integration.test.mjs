@@ -15,9 +15,10 @@ function deferred() {
   const promise = new Promise((r) => (resolve = r));
   return { promise, resolve };
 }
-async function peer(t, handler) {
+async function peer(t, handler, { keepAliveTimeout } = {}) {
   const sockets = new Set();
   const server = createServer(handler);
+  if (keepAliveTimeout !== undefined) server.keepAliveTimeout = keepAliveTimeout;
   server.on("connection", (socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
@@ -443,7 +444,9 @@ test("aborting an unread completed download settles the actual returned stream",
 test("early upload response closes the actual source and joins its asynchronous cancellation", async (t) => {
   const canceled = deferred();
   const allowCancel = deferred();
-  const url = await peer(t, (_req, res) => json(res, { data: { completed: true } }));
+  const url = await peer(t, (_req, res) => json(res, { data: { completed: true } }), {
+    keepAliveTimeout: 0,
+  });
   const stream = new ReadableStream({
     start(controller) {
       controller.enqueue(new Uint8Array(100));
@@ -802,4 +805,60 @@ test("host prepublication close can retain its original ordinary class after con
   await client.connect({ joinPhysical: true });
   await client.close({ capacityClass: "ordinary" });
   assert.deepEqual(classes, ["ordinary", "ordinary"]);
+});
+
+test("fresh HTTP sockets survive post-response proof then physically close without pooling", async (t) => {
+  const { createClientTransport } = await import("../dist/client.js");
+  const sockets = new Set();
+  const peers = [];
+  const server = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ data: [] }));
+    });
+  });
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    peers.push(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => server.close(resolve));
+  });
+  const transport = createClientTransport();
+  for (let index = 0; index < 2; index++) {
+    let checked = false;
+    const exchange = transport.start({
+      url: `http://127.0.0.1:${server.address().port}/`,
+      path: "/v1/proof",
+      method: "POST",
+      token: "fixture",
+      json: {},
+      signal: new AbortController().signal,
+      requestBytes: 1024,
+      responseBytes: 1024,
+      authority: {
+        assertCurrent() {},
+        async beforeSend() {},
+        invalidate() {
+          assert.fail("healthy peer must remain valid");
+        },
+        async afterResponse(socket) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          assert.equal(socket.destroyed, false);
+          assert.equal(socket.readyState, "open");
+          assert.equal(sockets.size, 1);
+          checked = true;
+        },
+      },
+    });
+    assert.deepEqual(await exchange.result, { ok: true, body: { data: [] } });
+    assert.equal(checked, true);
+    await exchange.settled;
+  }
+  assert.equal(peers.length, 2);
+  assert.notEqual(peers[0], peers[1]);
 });

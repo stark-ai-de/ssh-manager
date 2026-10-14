@@ -4,6 +4,7 @@ import { serveManagementStdio } from "./stdio.js";
 import { ensureRuntime } from "@stark-ai/ssh-manager-runtime/launcher";
 import { ManagementClient } from "@stark-ai/ssh-manager-runtime/client";
 import path from "node:path";
+import { realpathSync } from "node:fs";
 
 async function main() {
   const directoryIndex = process.argv.indexOf("--state-directory");
@@ -35,9 +36,15 @@ async function main() {
   process.once("SIGTERM", close);
   process.stdin.once("end", close);
 }
-void main().catch(() => {
-  console.error(
-    "SSH management MCP startup failed. Start the local daemon with Node 24 and complete trusted local setup.",
-  );
-  process.exitCode = 1;
-});
+export { serveManagementStdio, supportsReusableManagementStdio } from "./stdio.js";
+export const supportsScopedManagementStdio = true;
+if (
+  process.argv[1] &&
+  realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)
+)
+  void main().catch(() => {
+    console.error(
+      "SSH management MCP startup failed. Start the local daemon with Node 24 and complete trusted local setup.",
+    );
+    process.exitCode = 1;
+  });
