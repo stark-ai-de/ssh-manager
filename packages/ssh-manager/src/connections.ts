@@ -14,7 +14,7 @@ import { StateStore } from "./state.js";
 import { HostTrust, fingerprint } from "./trust.js";
 import type { CredentialProvider } from "./credentials.js";
 import { Vault } from "./vault.js";
-import { id, now, aborted, request } from "./util.js";
+import { id, now, aborted, request, authorizedResourceInfo } from "./util.js";
 import { proxySocket } from "./proxy.js";
 
 export type Lease = { client: Client; info: ConnectionInfo; release(): void };
@@ -105,6 +105,21 @@ export class ConnectionPool extends EventEmitter {
       })),
     );
   }
+  private capacity() {
+    const pending = [...this.pending.values()];
+    const entries = [...this.entries.values()];
+    const transports =
+      entries.reduce((count, entry) => count + entry.chain.length, 0) +
+      pending.reduce((count, attempt) => count + attempt.dependencies.length, 0);
+    const isSaturated = (profile: Profile) =>
+      entries.reduce((count, entry) => count + Number(entry.dependencies.includes(profile.id)), 0) +
+        pending.reduce(
+          (count, attempt) => count + Number(attempt.dependencies.includes(profile.id)),
+          0,
+        ) >=
+      this.limits.perTarget;
+    return { entries, transports, isSaturated };
+  }
   async acquire(
     actor: Actor,
     targetId: string,
@@ -123,19 +138,8 @@ export class ConnectionPool extends EventEmitter {
           e.info.targetId === targetId && e.key === key && e.info.channels < this.limits.channels,
       );
       if (available) return this.lease(available);
-      const pending = [...this.pending.values()];
-      const entries = [...this.entries.values()];
-      const transports =
-        entries.reduce((count, entry) => count + entry.chain.length, 0) +
-        pending.reduce((count, attempt) => count + attempt.dependencies.length, 0);
-      const saturated = profiles
-        .filter(
-          (profile) =>
-            entries.filter((entry) => entry.dependencies.includes(profile.id)).length +
-              pending.filter((attempt) => attempt.dependencies.includes(profile.id)).length >=
-            this.limits.perTarget,
-        )
-        .map((profile) => profile.id);
+      const { entries, transports, isSaturated } = this.capacity();
+      const saturated = profiles.filter(isSaturated).map((profile) => profile.id);
       if (profiles.length > this.limits.connections)
         fault("LIMIT", "Jump route exceeds the transport connection budget.");
       if (!saturated.length && transports + profiles.length <= this.limits.connections) {
@@ -371,21 +375,9 @@ export class ConnectionPool extends EventEmitter {
       fault("INVALID_ROUTE", "Invalid jump chain.");
     aborted(signal);
     if (this.closed) fault("CLOSED", "Connection pool is closed.");
-    const profiles = [...jumps, target],
-      entries = [...this.entries.values()],
-      pending = [...this.pending.values()];
-    if (
-      entries.reduce((count, entry) => count + entry.chain.length, 0) +
-        pending.reduce((count, attempt) => count + attempt.dependencies.length, 0) +
-        profiles.length >
-        this.limits.connections ||
-      profiles.some(
-        (profile) =>
-          entries.filter((entry) => entry.dependencies.includes(profile.id)).length +
-            pending.filter((attempt) => attempt.dependencies.includes(profile.id)).length >=
-          this.limits.perTarget,
-      )
-    )
+    const profiles = [...jumps, target];
+    const { transports, isSaturated } = this.capacity();
+    if (transports + profiles.length > this.limits.connections || profiles.some(isSaturated))
       fault("LIMIT", "Host inspection connection budget reached.");
     const attempt = id(),
       controller = new AbortController();
@@ -407,16 +399,9 @@ export class ConnectionPool extends EventEmitter {
     }
   }
   list(actor: Actor) {
-    return [...this.entries.values()]
-      .filter((e) => {
-        try {
-          this.authorize(actor, e.info.targetId, "connect");
-          return true;
-        } catch {
-          return false;
-        }
-      })
-      .map((e) => ({ ...e.info }));
+    return authorizedResourceInfo(this.entries.values(), (info) =>
+      this.authorize(actor, info.targetId, "connect"),
+    );
   }
   close(actor: Actor, connectionId: string) {
     const entry = this.entries.get(connectionId);

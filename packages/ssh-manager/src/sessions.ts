@@ -13,7 +13,8 @@ import {
 import { ConnectionPool, type Lease } from "./connections.js";
 import { StateStore } from "./state.js";
 import { Vault } from "./vault.js";
-import { id, now, OutputBuffer, request } from "./util.js";
+import type { SessionOptions } from "./public-api.js";
+import { id, now, OutputBuffer, request, authorizedResourceInfo } from "./util.js";
 
 type Terminal = InstanceType<typeof headless.Terminal>;
 type Serialize = InstanceType<typeof serialize.SerializeAddon>;
@@ -113,17 +114,7 @@ export class Sessions {
     this.authorize(actor, session.info.targetId, "shell");
     return session;
   }
-  async create(
-    actor: Actor,
-    targetId: string,
-    options: {
-      cols?: number;
-      rows?: number;
-      tmux?: boolean;
-      recording?: boolean;
-      signal?: AbortSignal;
-    } = {},
-  ) {
+  async create(actor: Actor, targetId: string, options: SessionOptions = {}) {
     const profile = this.authorize(actor, targetId, "shell");
     this.dimensions(options.cols ?? 80, options.rows ?? 24);
     if (options.tmux && profile.shell !== "posix")
@@ -470,17 +461,11 @@ export class Sessions {
     return { text: this.vault.get(`recording:${sessionId}`).value };
   }
   list(actor: Actor, targetId?: string) {
-    return [...this.sessions.values()]
-      .filter((s) => !targetId || s.info.targetId === targetId)
-      .filter((s) => {
-        try {
-          this.get(actor, s.info.id);
-          return true;
-        } catch {
-          return false;
-        }
-      })
-      .map((s) => ({ ...s.info }));
+    return authorizedResourceInfo(
+      this.sessions.values(),
+      (info) => this.get(actor, info.id),
+      targetId,
+    );
   }
   shutdown() {
     clearInterval(this.expiry);

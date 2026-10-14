@@ -8,7 +8,8 @@ import {
   type ManagerEvent,
 } from "./contracts.js";
 import { ConnectionPool, type Lease } from "./connections.js";
-import { id, now, request, OutputBuffer, aborted } from "./util.js";
+import type { JobOptions, GroupResult } from "./public-api.js";
+import { id, now, request, OutputBuffer, aborted, authorizedResourceInfo } from "./util.js";
 
 export function shellCommand(profile: Profile, command: string) {
   if (profile.shell === "powershell")
@@ -40,12 +41,7 @@ export class Jobs {
           this.finish(job, "unknown");
     });
   }
-  async start(
-    actor: Actor,
-    targetId: string,
-    command: string,
-    options: { signal?: AbortSignal; timeout?: number } = {},
-  ) {
+  async start(actor: Actor, targetId: string, command: string, options: JobOptions = {}) {
     const profile = this.authorize(actor, targetId, "shell");
     if (
       typeof command !== "string" ||
@@ -157,36 +153,17 @@ export class Jobs {
     };
   }
   list(actor: Actor, targetId?: string) {
-    return [...this.jobs.values()]
-      .filter((j) => !targetId || j.info.targetId === targetId)
-      .filter((j) => {
-        try {
-          this.get(actor, j.info.id);
-          return true;
-        } catch {
-          return false;
-        }
-      })
-      .map((j) => ({ ...j.info }));
+    return authorizedResourceInfo(this.jobs.values(), (info) => this.get(actor, info.id), targetId);
   }
   cancel(actor: Actor, jobId: string) {
     const job = this.get(actor, jobId);
     this.cancelInternal(job);
     return { ...job.info, remoteTerminationConfirmed: false };
   }
-  async group(
-    actor: Actor,
-    targets: string[],
-    command: string,
-    options: { signal?: AbortSignal; timeout?: number } = {},
-  ) {
+  async group(actor: Actor, targets: string[], command: string, options: JobOptions = {}) {
     if (targets.length > 64 || !targets.length || new Set(targets).size !== targets.length)
       fault("INVALID_ARGUMENT", "Group requires one to 64 distinct explicit targets.");
-    const results: {
-      targetId: string;
-      job?: JobInfo;
-      error?: { code: string; message: string };
-    }[] = [];
+    const results: GroupResult[] = [];
     let index = 0;
     await Promise.all(
       Array.from({ length: Math.min(4, targets.length) }, async () => {

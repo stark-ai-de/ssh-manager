@@ -17,6 +17,7 @@ import { handlers } from "./handlers.js";
 import { resultSchema } from "./outputs.js";
 
 type Registration = { actor: Actor; expires: number };
+const fileQuery = z.strictObject({ targetId: z.string(), path: z.string() });
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 function localToken(file: string) {
   if (!fs.existsSync(file))
@@ -276,7 +277,7 @@ export async function createRuntime(
         },
       };
     }
-    const fileParameters = ["targetId", "path"].map((name) => ({
+    const fileParameters = Object.keys(fileQuery.shape).map((name) => ({
       name,
       in: "query",
       required: true,
@@ -329,7 +330,7 @@ export async function createRuntime(
       components: { securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } } },
     }));
     app.get("/v1/files/download", async (req, reply) => {
-      const query = z.strictObject({ targetId: z.string(), path: z.string() }).parse(req.query);
+      const query = fileQuery.parse(req.query);
       const controller = new AbortController();
       reply.raw.once("close", () => {
         if (!reply.raw.writableFinished) controller.abort();
@@ -344,7 +345,7 @@ export async function createRuntime(
       done(null, payload),
     );
     app.put("/v1/files/upload", async (req) => {
-      const query = z.strictObject({ targetId: z.string(), path: z.string() }).parse(req.query);
+      const query = fileQuery.parse(req.query);
       const controller = new AbortController();
       req.raw.once("aborted", () => controller.abort());
       return {

@@ -4,6 +4,7 @@ import { pipeline } from "node:stream/promises";
 import type { SFTPWrapper, Stats, FileEntryWithStats } from "ssh2";
 import { fault, ManagementError, type Actor, type Capability, type Profile } from "./contracts.js";
 import { ConnectionPool, type Lease } from "./connections.js";
+import type { TransferOptions } from "./public-api.js";
 import { aborted, request } from "./util.js";
 
 export class Files {
@@ -218,12 +219,7 @@ export class Files {
     actor: Actor,
     targetId: string,
     remote: string,
-    options: {
-      signal?: AbortSignal;
-      offset?: number;
-      length?: number;
-      progress?: (bytes: number) => void;
-    } = {},
+    options: TransferOptions & { offset?: number; length?: number } = {},
   ): Promise<Readable> {
     const ctx = await this.open(actor, targetId, false, options.signal);
     try {
@@ -287,7 +283,7 @@ export class Files {
     targetId: string,
     remote: string,
     input: Readable,
-    options: { signal?: AbortSignal; progress?: (bytes: number) => void; mode?: number } = {},
+    options: TransferOptions & { mode?: number } = {},
   ) {
     const ctx = await this.open(actor, targetId, true, options.signal);
     let timer: ReturnType<typeof setTimeout> | undefined;

@@ -61,64 +61,46 @@ async function main() {
   }
   const client = await localClient("operator", { stateDirectory });
   try {
+    let result: unknown;
     if (command === "stop") {
-      console.log(JSON.stringify(await client.stopRuntime()));
-      return;
-    }
-    if (command === "vault-init") {
-      console.log(
-        JSON.stringify(
-          await client.call("ssh_vault_initialize", {
-            password: await secretPrompt("New vault password"),
-          }),
-        ),
-      );
-      return;
-    }
-    if (command === "vault-unlock") {
-      console.log(
-        JSON.stringify(
-          await client.call("ssh_vault_unlock", { password: await secretPrompt("Vault password") }),
-        ),
-      );
-      return;
-    }
-    if (command === "vault-lock") {
-      console.log(JSON.stringify(await client.call("ssh_vault_lock", {})));
-      return;
-    }
-    if (command === "vault-rotate") {
-      console.log(
-        JSON.stringify(
-          await client.call("ssh_vault_rotate", {
-            previousPassword: await secretPrompt("Previous vault password"),
-            nextPassword: await secretPrompt("New vault password"),
-          }),
-        ),
-      );
-      return;
-    }
-    if (command !== "operator" || !args[1] || !(args[1] in catalog) || !args[2])
-      throw new Error("Choose a documented operation and a local JSON argument file.");
-    const name = args[1] as Operation;
-    const definition = catalog[name];
-    const input = JSON.parse(fs.readFileSync(path.resolve(args[2]), "utf8"));
-    if (definition.operator) {
-      if (!process.stdin.isTTY)
-        throw new Error(
-          "Permission, trust and credential setup requires a local interactive operator terminal.",
+      result = await client.stopRuntime();
+    } else if (command === "vault-init") {
+      result = await client.call("ssh_vault_initialize", {
+        password: await secretPrompt("New vault password"),
+      });
+    } else if (command === "vault-unlock") {
+      result = await client.call("ssh_vault_unlock", {
+        password: await secretPrompt("Vault password"),
+      });
+    } else if (command === "vault-lock") {
+      result = await client.call("ssh_vault_lock", {});
+    } else if (command === "vault-rotate") {
+      result = await client.call("ssh_vault_rotate", {
+        previousPassword: await secretPrompt("Previous vault password"),
+        nextPassword: await secretPrompt("New vault password"),
+      });
+    } else {
+      if (command !== "operator" || !args[1] || !(args[1] in catalog) || !args[2])
+        throw new Error("Choose a documented operation and a local JSON argument file.");
+      const name = args[1] as Operation;
+      const definition = catalog[name];
+      const input = JSON.parse(fs.readFileSync(path.resolve(args[2]), "utf8"));
+      if (definition.operator) {
+        if (!process.stdin.isTTY)
+          throw new Error(
+            "Permission, trust and credential setup requires a local interactive operator terminal.",
+          );
+        const confirmation = await secretPrompt(
+          name === "ssh_host_confirm"
+            ? `Type the reviewed fingerprint ${input.fingerprint}`
+            : `Type ${name} to authorize this local setup action`,
         );
-      const confirmation = await secretPrompt(
-        name === "ssh_host_confirm"
-          ? `Type the reviewed fingerprint ${input.fingerprint}`
-          : `Type ${name} to authorize this local setup action`,
-      );
-      if (confirmation !== (name === "ssh_host_confirm" ? input.fingerprint : name))
-        throw new Error("Confirmation did not match.");
+        if (confirmation !== (name === "ssh_host_confirm" ? input.fingerprint : name))
+          throw new Error("Confirmation did not match.");
+      }
+      result = await client.call(name, definition.schema.parse(input) as any);
     }
-    console.log(
-      JSON.stringify(await client.call(name, definition.schema.parse(input) as any), null, 2),
-    );
+    console.log(JSON.stringify(result, null, command === "operator" ? 2 : undefined));
   } finally {
     await client.close();
   }

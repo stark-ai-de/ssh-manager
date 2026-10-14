@@ -27,28 +27,24 @@ function progressStream(progress?: (bytes: number) => void) {
   });
 }
 export function assertLoopback(url: string) {
-  let parsed: URL;
   try {
-    parsed = new URL(url);
+    const parsed = new URL(url);
+    if (
+      parsed.protocol !== "http:" ||
+      !["127.0.0.1", "[::1]"].includes(parsed.hostname) ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    )
+      throw new Error();
+    return parsed.origin;
   } catch {
     throw new APIError(
       "INVALID_ENDPOINT",
       "Management API must be authenticated local loopback HTTP.",
     );
   }
-  if (
-    parsed.protocol !== "http:" ||
-    !["127.0.0.1", "[::1]"].includes(parsed.hostname) ||
-    parsed.username ||
-    parsed.password ||
-    parsed.search ||
-    parsed.hash
-  )
-    throw new APIError(
-      "INVALID_ENDPOINT",
-      "Management API must be authenticated local loopback HTTP.",
-    );
-  return parsed.origin;
 }
 export class ManagementClient {
   private token?: string;

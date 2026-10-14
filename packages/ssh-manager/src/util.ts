@@ -31,6 +31,24 @@ export function atomicJson(file: string, value: unknown) {
 export function aborted(signal?: AbortSignal) {
   if (signal?.aborted) fault("CANCELLED", "Operation was cancelled.");
 }
+/** Keep listing policy with the caller; denied entries are omitted and results are snapshots. */
+export function authorizedResourceInfo<T extends { id: string; targetId: string }>(
+  resources: Iterable<{ info: T }>,
+  check: (info: T) => unknown,
+  targetId?: string,
+): T[] {
+  const entries = [...resources];
+  return (targetId ? entries.filter(({ info }) => info.targetId === targetId) : entries)
+    .filter(({ info }) => {
+      try {
+        check(info);
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .map(({ info }) => ({ ...info }));
+}
 /** Every SSH channel request has a deadline independent of the authentication deadline. */
 export function request<T>(
   start: (callback: (error?: Error | null, result?: T) => void) => void,

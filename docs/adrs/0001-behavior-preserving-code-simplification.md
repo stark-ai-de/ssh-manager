@@ -1,0 +1,30 @@
+# ADR-0001: Behavior-preserving code simplification
+
+Status: Accepted  
+Date: 2026-10-13  
+Owner: SSH Manager maintainers  
+Applies to: Work requested as code simplification or behavior-preserving refactoring  
+Supersedes: None  
+Superseded by: None
+
+## Decision
+
+Simplification removes maintained responsibilities and unnecessary delegation while preserving observable behavior. Inventory the entire requested scope, including tests, examples, scripts and non-ignored new files. Record the fixed baseline, pre-existing changes, owners, consumers and generated/vendor exclusions before editing; reconcile later concurrent changes without resetting cumulative savings.
+
+For each candidate, compare deletion, existing platform or declared-library capabilities, and reuse within an existing owner. Prefer a named internal function to a new abstraction when real callers have the same contract. Do not create speculative packages, generic resource frameworks or pass-through layers. A retained implementation with an explicit reason is a valid outcome.
+
+Preserve public types and exports, CLI and HTTP/MCP contracts, persisted formats, error semantics, ordering, defaults and nullability. Host verification, revision-bound human grants, credential isolation, authenticated writer identity, byte/resource bounds, cancellation and cleanup remain mandatory. Jobs are never replayed; plain PTY loss is not continuity; vault lock does not terminate existing authenticated sessions. Preserve a facade when it protects a supported API or runtime boundary. Similar-looking code with different trust, lifetime or compatibility obligations remains separate.
+
+Every implemented candidate needs a reversible diff and evidence at the owning boundary. Use existing tests and add only missing contract or regression proof. Preserve distinct assertions and failure cases when sharing fixtures. Reuse evidence only while candidate, dependencies, commands, fixtures, toolchain and environment still match. Follow the mandatory gates in [validation](../validation.md), including `pnpm validate` after implementation changes and relevant native/browser fixtures when their prerequisites are available. Local checks do not prove hosted, published or live behavior.
+
+Measure physical additions, deletions and net change separately for production, tests/fixtures, examples/scripts, documentation/configuration and generated/vendor/lockfiles. Include new helpers and untracked additions without staging them. A code-reduction claim requires a smaller total of handwritten code, including tests and support code, and a concrete maintenance improvement. Also report the all-file total when documentation grows. Moving code, minification, deleting required tests or excluding new support code is not a saving. No deletion quota applies.
+
+After each retained improvement, revisit affected callers and the inventory. Completion requires a final complete pass with no remaining evidenced qualifying candidate. Missing proof, failed checks, incomplete coverage, concurrent drift or a new dependency/ownership decision is a bounded stop, not convergence. Preserve independent verified changes; repair or revert only the affected task changes. Record retained/deferred candidates and their reopening conditions in the existing specification.
+
+Behavior changes, new dependencies, migrations and new ownership boundaries require their own approved scope. This decision does not authorize publication, merge or live SSH operations. Change this accepted decision through an accepted successor, not an in-place policy rewrite.
+
+## Consequences and sources
+
+The repository gains one small, local decision and an auditable implementation record. Some duplication remains where sharing would obscure policy or lifecycle. Governance documentation may increase even when maintained code decreases.
+
+This adapts Architecture Compass [AC-ADR-005](https://github.com/stark-ai-de/agent-skills/blob/6bbd94ffd80b6963eee614215dd3b5e430a8f875/skills/engineering-workflows/architecture-compass/references/ac-adr-005-make-repository-adrs-binding-agent-guardrails.long.md), [AC-ADR-006](https://github.com/stark-ai-de/agent-skills/blob/6bbd94ffd80b6963eee614215dd3b5e430a8f875/skills/engineering-workflows/architecture-compass/references/ac-adr-006-assign-workspace-ownership-and-source-roles.long.md), [AC-ADR-007](https://github.com/stark-ai-de/agent-skills/blob/6bbd94ffd80b6963eee614215dd3b5e430a8f875/skills/engineering-workflows/architecture-compass/references/ac-adr-007-enforce-runtime-safe-module-and-public-package-boundaries.long.md), [AC-ADR-013](https://github.com/stark-ai-de/agent-skills/blob/6bbd94ffd80b6963eee614215dd3b5e430a8f875/skills/engineering-workflows/architecture-compass/references/ac-adr-013-own-language-package-build-lint-and-supply-chain-tooling-explicitly.long.md), [AC-ADR-049](https://github.com/stark-ai-de/agent-skills/blob/6bbd94ffd80b6963eee614215dd3b5e430a8f875/skills/engineering-workflows/architecture-compass/references/ac-adr-049-distinguish-change-risk-from-representative-environment-observation.long.md) at Agent Skills revision `6bbd94f`. The [AC-ADR-006 simplification guide](https://github.com/stark-ai-de/agent-skills/blob/6bbd94ffd80b6963eee614215dd3b5e430a8f875/skills/engineering-workflows/architecture-compass/references/ac-adr-006-assign-workspace-ownership-and-source-roles.guide.md#simplification-loop) supplied the workflow; this local decision makes the rules above normative here. [Agent Skills ADR-0044](https://github.com/stark-ai-de/agent-skills/blob/6bbd94ffd80b6963eee614215dd3b5e430a8f875/docs/adrs/0044-centralize-listing-identity-and-catalog-derivations.long.md) is an ownership example and [ADR-0041](https://github.com/stark-ai-de/agent-skills/blob/6bbd94ffd80b6963eee614215dd3b5e430a8f875/docs/adrs/0041-select-validation-from-changed-contracts-and-owning-boundaries.long.md) a validation adaptation, not binding SSH Manager policy. The existing [architecture](../architecture.md), [security model](../security-model.md) and [artifact contract](../artifact-contract.md) retain their specific obligations.
