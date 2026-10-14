@@ -2,7 +2,11 @@ import { McpServer, type ServerContext } from "@modelcontextprotocol/server";
 import { catalog, resultSchema, type Operation } from "@stark-ai/ssh-manager-runtime/catalog";
 import { APIError, type ManagementClient } from "@stark-ai/ssh-manager-runtime/client";
 
-export function createMcpServer(client: ManagementClient) {
+export interface McpIntegrationOptions {
+  beforeCall?: (operation: Operation, context: ServerContext) => Promise<void>;
+  onCleanupError?: () => void;
+}
+export function createMcpServer(client: ManagementClient, options: McpIntegrationOptions = {}) {
   const server = new McpServer(
     { name: "stark-ssh-management", version: "1.0.0" },
     { capabilities: { tools: {} } },
@@ -19,6 +23,7 @@ export function createMcpServer(client: ManagementClient) {
       },
       async (args: any, context: ServerContext) => {
         try {
+          await options.beforeCall?.(name as Operation, context);
           const structuredContent = {
             data: await client.call(name as Operation, args, { signal: context.mcpReq.signal }),
           };
@@ -51,7 +56,7 @@ export function createMcpServer(client: ManagementClient) {
     );
   }
   server.server.onclose = () => {
-    void client.close();
+    void client.close().catch(() => options.onCleanupError?.());
   };
   return server;
 }

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
-import { serveStdio, StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { serveManagementStdio } from "./stdio.js";
 import { ensureRuntime } from "@stark-ai/ssh-manager-runtime/launcher";
 import { ManagementClient } from "@stark-ai/ssh-manager-runtime/client";
 import path from "node:path";
-import { createMcpServer } from "./server.js";
 
 async function main() {
   const directoryIndex = process.argv.indexOf("--state-directory");
@@ -20,38 +19,21 @@ async function main() {
           : undefined
         : process.argv[daemonIndex + 1],
   });
-  const clients = new Set<ManagementClient>();
-  const handle = serveStdio(
-    async () => {
-      const client = await new ManagementClient(
+  const handle = serveManagementStdio({
+    createClient: () =>
+      new ManagementClient(
         runtime.url,
         fs.readFileSync(path.join(runtime.stateDirectory, "agent.token"), "utf8").trim(),
-      ).connect();
-      clients.add(client);
-      const server = createMcpServer(client);
-      server.server.onclose = () => {
-        clients.delete(client);
-        void client.close();
-      };
-      return server;
-    },
-    {
-      legacy: "serve",
-      transport: new StdioServerTransport(process.stdin, process.stdout, {
-        maxBufferSize: 1024 * 1024,
-      }),
-      onerror: () => console.error("MCP transport error; inspect protocol compatibility."),
-    },
-  );
-  const detach = () => Promise.all([...clients].map((c) => c.close()));
+        { expectedKind: "agent" },
+      ),
+    onerror: () => console.error("MCP transport error; inspect protocol compatibility."),
+  });
   const close = () => {
-    void handle.close().finally(detach);
+    void handle.close();
   };
   process.once("SIGINT", close);
   process.once("SIGTERM", close);
-  process.stdin.once("end", () => {
-    void detach();
-  });
+  process.stdin.once("end", close);
 }
 void main().catch(() => {
   console.error(

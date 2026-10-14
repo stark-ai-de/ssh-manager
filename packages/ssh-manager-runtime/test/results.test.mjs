@@ -27,8 +27,17 @@ async function replyClient(t, reply) {
   const server = http.createServer((request, response) => {
     request.resume();
     let result;
-    if (request.url === "/v1/clients") result = { body: { data: { token: "fixture-token" } } };
-    else if (request.url === "/v1/clients/detach") result = { body: { data: { completed: true } } };
+    if (request.url === "/v1/clients")
+      result = {
+        body: {
+          data: {
+            token: "t".repeat(43),
+            actor: { id: "fixture-actor", kind: "agent" },
+            expiresInMs: 120000,
+          },
+        },
+      };
+    else if (request.url === "/v1/clients/detach") result = { body: { data: { detached: true } } };
     else {
       requests.push(request.url);
       result = reply(request.url, requests.length - 1);
