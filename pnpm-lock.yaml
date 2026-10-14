@@ -246,6 +246,9 @@ importers:
       zod:
         specifier: 4.6.5
         version: 4.6.5
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
     devDependencies:
       '@types/node':
         specifier: ^26.6.3
@@ -256,9 +259,6 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
-      ws:
-        specifier: 8.22.0
-        version: 8.22.0
 
 packages:
 

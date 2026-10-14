@@ -1,3 +1,9 @@
+import {
+  createSessionStream,
+  type SessionStream,
+  type SessionStreamOptions,
+} from "./session-stream.js";
+export type { SessionStream, SessionStreamOptions } from "./session-stream.js";
 import type { Operation, OperationInputs } from "./catalog.js";
 import { catalog } from "./catalog.js";
 import { parseOperationResult, type OperationResults } from "./outputs.js";
@@ -42,6 +48,9 @@ export type ClientCallOptions = {
   signal?: AbortSignal;
   timeout?: number;
   authority?: ClientExchangeAuthority;
+  /** JSON calls join the actual exchange tail, including errors and cancellation. */
+  joinPhysical?: boolean;
+  capacityClass?: "ordinary" | "control";
 };
 export type TransferOptions = ClientCallOptions & { progress?: (bytes: number) => void };
 function transferOptions(input?: AbortSignal | TransferOptions): TransferOptions {
@@ -90,7 +99,7 @@ export interface ManagementClientOptions {
   /** Canonical transport unless an embedding supplies an explicit alternative. */
   transport?: ClientTransport;
   /** Invoked for every exchange; returns this exchange's actual owner checks. */
-  authority?: (path: string) => ClientExchangeAuthority;
+  authority?: (path: string, options: ClientCallOptions) => ClientExchangeAuthority;
   expectedKind?: "agent" | "operator";
   automaticHeartbeat?: boolean;
   onRegistered?: (
@@ -127,12 +136,14 @@ export class ManagementClient {
   #cleanupSettled = false;
   #invalid = false;
   #pending = new Set<ClientExchange>();
+  #streams = new Set<SessionStream>();
   #ordinary = 0;
   #control = 0;
   #transport: ClientTransport;
   #registrationExchange?: ClientExchange;
   #registrationAuthority?: ClientExchangeAuthority;
   #abandonedRegistrationAuthority?: ClientExchangeAuthority;
+  #registrationAbandoned = false;
   readonly url: string;
   constructor(
     url: string,
@@ -151,6 +162,7 @@ export class ManagementClient {
     this.#invalid = true;
     clearInterval(this.#timer);
     for (const exchange of this.#pending) exchange.cancel();
+    for (const stream of this.#streams) void stream.close();
     this.options.onInvalidated?.();
   }
   #start(
@@ -165,6 +177,7 @@ export class ManagementClient {
       closing?: boolean;
       authority?: ClientExchangeAuthority;
       retainSent?: boolean;
+      capacityClass?: "ordinary" | "control";
     } = {},
   ) {
     if (this.#invalid || (this.#closed && !options.closing))
@@ -190,13 +203,16 @@ export class ManagementClient {
         : Object.hasOwn(catalog, method)
           ? 16777216
           : 16384;
-    const authority = options.authority ?? this.options.authority?.(path);
+    const authority = options.authority ?? this.options.authority?.(path, options);
     authority?.assertCurrent();
     const signal = AbortSignal.any([
       AbortSignal.timeout(options.timeout ?? 30000),
       ...(options.signal && !options.retainSent ? [options.signal] : []),
     ]);
-    const control = path === "/v1/clients/heartbeat" || path === "/v1/clients/detach";
+    const control =
+      options.capacityClass === "control" ||
+      (options.capacityClass === undefined &&
+        (path === "/v1/clients/heartbeat" || path === "/v1/clients/detach"));
     if (this.options.capacity) {
       for (const value of Object.values(this.options.capacity))
         if (!Number.isSafeInteger(value) || value < 1)
@@ -223,6 +239,7 @@ export class ManagementClient {
       download: options.download,
       signal,
       abandonSignal: options.retainSent ? options.signal : undefined,
+      capacityClass: control ? "control" : "ordinary",
       authority,
     });
     this.#pending.add(exchange);
@@ -287,12 +304,25 @@ export class ManagementClient {
       this.#registrationExchange = undefined;
       this.#registrationAuthority = undefined;
       this.#abandonedRegistrationAuthority = undefined;
+      this.#registrationAbandoned = false;
     }
     if (this.#closed || this.#invalid)
       return Promise.reject(
         new APIError("NOT_CONNECTED", "This API client is no longer attached."),
       );
-    if (this.#token && !this.#closed && !this.#invalid) return Promise.resolve(this);
+    if (this.#token && !this.#closed && !this.#invalid) {
+      if (!options.joinPhysical) return Promise.resolve(this);
+      const exchange = this.#registrationExchange;
+      if (!exchange)
+        return Promise.reject(
+          new APIError("NOT_CONNECTED", "Registration ownership is unavailable."),
+        );
+      return exchange.settled.then(() => {
+        if (this.#closed || this.#invalid || signal?.aborted)
+          throw new APIError("NOT_CONNECTED", "This API client is no longer attached.");
+        return this;
+      });
+    }
     if (!this.#connecting) {
       const attempt = this.#register(options);
       this.#connecting = attempt;
@@ -311,35 +341,48 @@ export class ManagementClient {
         throw new APIError("NOT_CONNECTED", "This API client is no longer attached.");
       return this;
     });
-    if (!signal || !this.options.retainSentRegistration) return connected;
-    return new Promise<this>((resolve, reject) => {
-      let completed = false;
-      const abandon = () => {
-        if (completed) return;
-        completed = true;
-        signal.removeEventListener("abort", abandon);
-        this.#abandonedRegistrationAuthority = this.#registrationAuthority;
-        // Closing becomes effective synchronously; only the private sent cleanup continues.
-        void this.close().catch(() => {});
-        reject(new APIError("CANCELLED_OR_TIMEOUT", "Registration caller was cancelled."));
-      };
-      if (signal.aborted) abandon();
-      else signal.addEventListener("abort", abandon, { once: true });
-      void connected.then(
-        (value) => {
+    const joined = async (attempt: Promise<this>): Promise<this> => {
+      try {
+        return await attempt;
+      } catch (error) {
+        if (options.joinPhysical && this.#closed) await this.close();
+        throw error;
+      } finally {
+        if (options.joinPhysical) await this.#registrationExchange?.settled;
+      }
+    };
+    if (!signal || !this.options.retainSentRegistration) return joined(connected);
+    return joined(
+      new Promise<this>((resolve, reject) => {
+        let completed = false;
+        const abandon = () => {
           if (completed) return;
           completed = true;
           signal.removeEventListener("abort", abandon);
-          resolve(value);
-        },
-        (error) => {
-          if (completed) return;
-          completed = true;
-          signal.removeEventListener("abort", abandon);
-          reject(error);
-        },
-      );
-    });
+          this.#registrationAbandoned = true;
+          this.#abandonedRegistrationAuthority = this.#registrationAuthority;
+          // Closing becomes effective synchronously; only the private sent cleanup continues.
+          void this.close().catch(() => {});
+          reject(new APIError("CANCELLED_OR_TIMEOUT", "Registration caller was cancelled."));
+        };
+        if (signal.aborted) abandon();
+        else signal.addEventListener("abort", abandon, { once: true });
+        void connected.then(
+          (value) => {
+            if (completed) return;
+            completed = true;
+            signal.removeEventListener("abort", abandon);
+            resolve(value);
+          },
+          (error) => {
+            if (completed) return;
+            completed = true;
+            signal.removeEventListener("abort", abandon);
+            reject(error);
+          },
+        );
+      }),
+    );
   }
 
   async #register(options: ClientCallOptions): Promise<this> {
@@ -383,9 +426,15 @@ export class ManagementClient {
         expiresInMs: data.expiresInMs as number,
       });
       this.#token = data.token;
-      if (!publish) this.#abandonedRegistrationAuthority = authority;
+      if (!publish) {
+        this.#registrationAbandoned = true;
+        this.#abandonedRegistrationAuthority = authority;
+      }
       this.options.onRegistered?.(identity, exchange, { publish });
-      if (this.#closed || signal?.aborted) this.#abandonedRegistrationAuthority = authority;
+      if (this.#closed || signal?.aborted) {
+        this.#registrationAbandoned = true;
+        this.#abandonedRegistrationAuthority = authority;
+      }
       authority?.assertCurrent();
       this.#identity = identity;
       if (publish && !this.#closed && this.options.automaticHeartbeat !== false) {
@@ -406,9 +455,13 @@ export class ManagementClient {
     options: ClientCallOptions & { closing?: boolean } = {},
   ) {
     const { exchange, authority } = this.#start(path, body, options);
-    const response = await this.#decode(exchange);
-    authority?.assertCurrent();
-    return response;
+    try {
+      const response = await this.#decode(exchange);
+      authority?.assertCurrent();
+      return response;
+    } finally {
+      if (options.joinPhysical) await exchange.settled;
+    }
   }
   async heartbeat(options: ClientCallOptions = {}) {
     const reply = await this.#request(
@@ -473,6 +526,18 @@ export class ManagementClient {
       throw new APIError("FORBIDDEN", "Runtime stop requires operator authority.");
     return this.#request("/v1/runtime/stop", {}, options);
   }
+  watchSession(sessionId: string, options: SessionStreamOptions): SessionStream {
+    if (this.#closed || this.#invalid || !this.#token)
+      throw new APIError(
+        "NOT_CONNECTED",
+        "Register this API client before opening session events.",
+      );
+    if (this.#streams.size >= 128) throw new APIError("LIMIT", "Session stream capacity reached.");
+    const stream = createSessionStream(this.url, this.#token, sessionId, options);
+    this.#streams.add(stream);
+    void stream.settled.then(() => this.#streams.delete(stream));
+    return stream;
+  }
   close(options: { authority?: ClientExchangeAuthority } = {}): Promise<void> {
     if (this.#closing) return this.#closing;
     this.#closed = true;
@@ -490,7 +555,10 @@ export class ManagementClient {
         exchange.cancel();
     this.#closing = (async () => {
       try {
-        await Promise.all(pending.map((exchange) => exchange.settled));
+        await Promise.all([
+          ...pending.map((exchange) => exchange.settled),
+          ...[...this.#streams].map((stream) => stream.close()),
+        ]);
         await this.#connecting?.catch(() => {});
         if (this.#token) {
           const { exchange } = this.#start(
@@ -500,10 +568,15 @@ export class ManagementClient {
               timeout: 2000,
               closing: true,
               authority: this.#abandonedRegistrationAuthority ?? options.authority,
+              capacityClass: this.#registrationAbandoned ? "ordinary" : "control",
             },
           );
-          const response = await this.#decode(exchange);
-          await exchange.settled;
+          let response: Record<string, unknown>;
+          try {
+            response = await this.#decode(exchange);
+          } finally {
+            await exchange.settled;
+          }
           if (object(response.data).detached !== true)
             throw new APIError("API_RESPONSE", "Management API did not confirm client detach.");
         }

@@ -592,3 +592,187 @@ test("registration cancellation stops owning a successfully returned client", as
   await client.close();
   assert.equal(detaches, 1);
 });
+
+test("shared transport capacity rejects a genuine unsent exchange and reuses only completed work", async (t) => {
+  const held = deferred();
+  let proofs = 0;
+  const entered = deferred();
+  const authority = {
+    assertCurrent() {},
+    async beforeSend() {},
+    async afterResponse() {
+      if (++proofs === 2) entered.resolve();
+      await held.promise;
+    },
+    invalidate() {},
+  };
+  const url = await peer(t, (_req, res) => json(res, registration));
+  const transport = createClientTransport({ capacity: { ordinary: 2, control: 1 } });
+  const a = transport.start(input(url, new AbortController().signal, authority));
+  const b = transport.start(input(url, new AbortController().signal, authority));
+  await entered.promise;
+  const refused = transport.start(input(url, new AbortController().signal, authority));
+  assert.equal(isClientExchangeForTransport(transport, refused), true);
+  await assert.rejects(refused.result, (error) => error.code === "LIMIT" && error.sent === false);
+  await refused.settled;
+  assert.equal(proofs, 2);
+  held.resolve();
+  await Promise.all([a.result, b.result, a.settled, b.settled]);
+  const next = transport.start(input(url, new AbortController().signal, authority));
+  await next.result;
+  await next.settled;
+  assert.equal(proofs, 3);
+});
+
+test("joining JSON completion retains a decoded result and a failed detach until physical tails", async () => {
+  const callTail = deferred(),
+    closeTail = deferred();
+  const paths = [];
+  const transport = {
+    start(request) {
+      paths.push(request.path);
+      const detach = request.path === "/v1/clients/detach";
+      return {
+        result: detach
+          ? Promise.reject(new Error("bad detach"))
+          : Promise.resolve({
+              ok: true,
+              body: request.path === "/v1/clients" ? registration : { data: [] },
+            }),
+        settled:
+          request.path === "/v1/clients"
+            ? Promise.resolve()
+            : detach
+              ? closeTail.promise
+              : callTail.promise,
+        sent: true,
+        responseComplete: !detach,
+        cancel() {},
+      };
+    },
+  };
+  const client = new ManagementClient("http://127.0.0.1:1/", "b".repeat(43), {
+    transport,
+    automaticHeartbeat: false,
+    strictCleanup: true,
+  });
+  await client.connect({ joinPhysical: true });
+  let callDone = false;
+  const call = client.call("ssh_hosts_list", {}, { joinPhysical: true }).then((value) => {
+    callDone = true;
+    return value;
+  });
+  await tick();
+  assert.equal(callDone, false);
+  callTail.resolve();
+  assert.deepEqual(await call, []);
+  let closeDone = false;
+  const closing = client.close();
+  const failed = assert.rejects(closing);
+  void closing.catch(() => {
+    closeDone = true;
+  });
+  while (!paths.includes("/v1/clients/detach")) await tick();
+  await tick();
+  assert.equal(closeDone, false);
+  closeTail.resolve();
+  await failed;
+  assert.equal(closeDone, true);
+});
+
+test("joined cancelled registration waits for its real response and original-ticket detach", async (t) => {
+  let registrationResponse, detachResponse;
+  const owners = [];
+  const authority = {
+    assertCurrent() {},
+    async beforeSend() {},
+    async afterResponse() {},
+    sent() {
+      owners.push("original");
+    },
+    invalidate() {},
+  };
+  const url = await peer(t, (req, res) => {
+    if (req.url === "/v1/clients") registrationResponse = res;
+    else detachResponse = res;
+  });
+  const client = new ManagementClient(url, "b".repeat(43), {
+    automaticHeartbeat: false,
+    retainSentRegistration: true,
+    strictCleanup: true,
+  });
+  const abort = new AbortController();
+  let done = false;
+  const connected = client.connect({ authority, signal: abort.signal, joinPhysical: true });
+  const failed = assert.rejects(connected);
+  void connected.catch(() => {
+    done = true;
+  });
+  while (!registrationResponse) await tick();
+  abort.abort();
+  await tick();
+  assert.equal(done, false);
+  json(registrationResponse, registration);
+  while (!detachResponse) await tick();
+  assert.equal(done, false);
+  json(detachResponse, { data: { detached: true } });
+  await failed;
+  assert.deepEqual(owners, ["original", "original"]);
+});
+
+test("shared transport rejects unknown runtime capacity classes and incomplete policies", async (t) => {
+  assert.throws(
+    () => createClientTransport({ capacity: { ordinary: 1 } }),
+    (error) => error.code === "LIMIT",
+  );
+  assert.throws(
+    () => createClientTransport({ capacity: { control: 1 } }),
+    (error) => error.code === "LIMIT",
+  );
+  let requests = 0;
+  const url = await peer(t, (_req, res) => {
+    requests++;
+    json(res, registration);
+  });
+  const transport = createClientTransport({ capacity: { ordinary: 1, control: 1 } });
+  const bad = transport.start({
+    ...input(url, new AbortController().signal),
+    capacityClass: "other",
+  });
+  await assert.rejects(bad.result, (error) => error.code === "API_RESPONSE" && !error.sent);
+  await bad.settled;
+  assert.equal(requests, 0);
+});
+
+test("cached registered connect joins its original held physical tail", async () => {
+  const tail = deferred();
+  const transport = {
+    start(request) {
+      return {
+        result: Promise.resolve({
+          ok: true,
+          body: request.path === "/v1/clients" ? registration : { data: { detached: true } },
+        }),
+        settled: request.path === "/v1/clients" ? tail.promise : Promise.resolve(),
+        sent: true,
+        responseComplete: true,
+        cancel() {},
+      };
+    },
+  };
+  const client = new ManagementClient("http://127.0.0.1:1/", "b".repeat(43), {
+    transport,
+    automaticHeartbeat: false,
+  });
+  await client.connect();
+  let done = false;
+  const connected = client.connect({ joinPhysical: true }).then((value) => {
+    done = true;
+    return value;
+  });
+  await tick();
+  assert.equal(done, false);
+  tail.resolve();
+  assert.equal(await connected, client);
+  await client.close();
+});

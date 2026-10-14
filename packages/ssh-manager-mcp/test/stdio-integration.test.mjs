@@ -75,3 +75,23 @@ test("stdio close joins actual held output transmission", async () => {
   await close;
   assert.equal(closed, true);
 });
+
+test("an asynchronous reporting failure cannot escape or interrupt owner close", async () => {
+  let reported = 0;
+  const wire = { async start() {}, async close() {}, async send() {} };
+  const handle = serveManagementStdio({
+    transport: wire,
+    createClient() {
+      throw new Error("unused factory");
+    },
+    async onerror() {
+      reported++;
+      throw new Error("reporting failed");
+    },
+  });
+  assert.doesNotThrow(() => wire.onerror(new Error("wire failure")));
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reported, 1);
+  await handle.close();
+});

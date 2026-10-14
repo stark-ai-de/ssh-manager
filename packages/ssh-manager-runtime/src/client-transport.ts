@@ -29,6 +29,7 @@ export interface ClientTransportRequest {
   /** Caller cancellation stops unsent work; sent registration cleanup continues privately. */
   readonly abandonSignal?: AbortSignal;
   readonly authority?: ClientExchangeAuthority;
+  readonly capacityClass?: "ordinary" | "control";
 }
 export interface ClientExchange {
   readonly result: Promise<unknown>;
@@ -169,9 +170,21 @@ export function serializeClientJson(value: unknown, maxBytes: number): string {
 }
 
 /** One fresh HTTP connection per exchange. Authority is supplied by trusted embedding code. */
-export function createClientTransport(): ClientTransport {
+export function createClientTransport(
+  options: { capacity?: { ordinary: number; control: number } } = {},
+): ClientTransport {
+  const active = { ordinary: 0, control: 0 };
+  if (
+    options.capacity &&
+    [options.capacity.ordinary, options.capacity.control].some(
+      (value) => !Number.isSafeInteger(value) || value < 1,
+    )
+  )
+    throw new ClientTransportError("LIMIT", false);
   const transport: ClientTransport = {
     start(input) {
+      let admitted = false;
+      const capacityClass = input.capacityClass ?? "ordinary";
       let sent = false;
       let responseComplete = false;
       let req: ClientRequest | undefined;
@@ -223,6 +236,19 @@ export function createClientTransport(): ClientTransport {
         let upload: Promise<void> | undefined;
         let uploadClose: Promise<void> = Promise.resolve();
         try {
+          if (capacityClass !== "ordinary" && capacityClass !== "control")
+            throw new ClientTransportError("API_RESPONSE", false);
+          if (
+            capacityClass === "control" &&
+            !["/v1/clients/heartbeat", "/v1/clients/detach", "/v1/ssh_session_detach"].includes(
+              input.path,
+            )
+          )
+            throw new ClientTransportError("API_RESPONSE", false);
+          if (options.capacity && active[capacityClass] >= options.capacity[capacityClass])
+            throw new ClientTransportError("LIMIT", false);
+          active[capacityClass]++;
+          admitted = true;
           if (input.signal.aborted || input.abandonSignal?.aborted || resultEnded)
             throw new ClientTransportError("CANCELLED_OR_TIMEOUT", false);
           const endpoint = new URL(input.url);
@@ -422,6 +448,7 @@ export function createClientTransport(): ClientTransport {
           socket?.destroy();
           uploadSource?.destroy();
           await Promise.all([socketClose, uploadClose, upload?.catch(() => {})]);
+          if (admitted) active[capacityClass]--;
           input.signal.removeEventListener("abort", cancel);
           input.abandonSignal?.removeEventListener("abort", abandon);
         }

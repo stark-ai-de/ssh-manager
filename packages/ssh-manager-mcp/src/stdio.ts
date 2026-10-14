@@ -12,7 +12,7 @@ export interface ManagementStdioOptions {
   maxSubscriptions?: number;
   /** Reusable concurrent admission requires the upstream SDK completion seam. */
   admission?: { maxRequests: number; maxMessages: number };
-  onerror?: () => void;
+  onerror?: () => void | Promise<void>;
   beforeCall?: McpIntegrationOptions["beforeCall"];
   input?: { messageBytes: number; maxMessages: number; windowMs: number };
   output?: { messageBytes: number; queuedBytes: number; maxMessages: number };
@@ -62,7 +62,13 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
   let messages = 0;
   let closed = false;
   let closing: Promise<void> | undefined;
-  const report = () => options.onerror?.();
+  const report = () => {
+    try {
+      void Promise.resolve(options.onerror?.()).catch(() => {});
+    } catch {
+      /* Reporting cannot interrupt owned cleanup. */
+    }
+  };
   const deny = () => {
     closed = true;
     report();
@@ -189,7 +195,7 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
             beforeCall: async (operation, context) => {
               if (closed) throw new APIError("NOT_CONNECTED", "MCP owner is closed.");
               await options.beforeCall?.(operation, context);
-              await client.connect(context.mcpReq.signal);
+              await client.connect({ signal: context.mcpReq.signal, joinPhysical: true });
               if (closed || client.registration?.kind !== "agent")
                 throw new APIError("FORBIDDEN", "MCP requires a registered agent client.");
             },

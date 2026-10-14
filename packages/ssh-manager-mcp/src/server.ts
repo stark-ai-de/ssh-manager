@@ -25,7 +25,10 @@ export function createMcpServer(client: ManagementClient, options: McpIntegratio
         try {
           await options.beforeCall?.(name as Operation, context);
           const structuredContent = {
-            data: await client.call(name as Operation, args, { signal: context.mcpReq.signal }),
+            data: await client.call(name as Operation, args, {
+              signal: context.mcpReq.signal,
+              joinPhysical: true,
+            }),
           };
           return {
             structuredContent,
