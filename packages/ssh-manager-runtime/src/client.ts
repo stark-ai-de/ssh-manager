@@ -538,7 +538,9 @@ export class ManagementClient {
     void stream.settled.then(() => this.#streams.delete(stream));
     return stream;
   }
-  close(options: { authority?: ClientExchangeAuthority } = {}): Promise<void> {
+  close(
+    options: { authority?: ClientExchangeAuthority; capacityClass?: "ordinary" | "control" } = {},
+  ): Promise<void> {
     if (this.#closing) return this.#closing;
     this.#closed = true;
     clearInterval(this.#timer);
@@ -568,7 +570,9 @@ export class ManagementClient {
               timeout: 2000,
               closing: true,
               authority: this.#abandonedRegistrationAuthority ?? options.authority,
-              capacityClass: this.#registrationAbandoned ? "ordinary" : "control",
+              capacityClass: this.#registrationAbandoned
+                ? "ordinary"
+                : (options.capacityClass ?? "control"),
             },
           );
           let response: Record<string, unknown>;

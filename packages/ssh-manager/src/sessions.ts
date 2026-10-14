@@ -25,7 +25,7 @@ type Session = {
   mirror: Terminal;
   serializer: Serialize;
   output: OutputBuffer;
-  readers: Map<string, number>;
+  readers: Map<string, { expires: number; epoch: object }>;
   writerUntil: number;
   pending: Promise<void>;
   recordingText: string;
@@ -74,7 +74,7 @@ export class Sessions {
     this.expiry = setInterval(() => {
       for (const session of this.sessions.values()) {
         for (const [actor, expiry] of session.readers)
-          if (expiry < Date.now()) this.detachInternal(session, actor);
+          if (expiry.expires < Date.now()) this.detachInternal(session, actor);
         if (session.writerUntil < Date.now() && session.info.writer) {
           session.info.writer = undefined;
           this.changed(session);
@@ -328,10 +328,15 @@ export class Sessions {
   }
 
   async attach(actor: Actor, sessionId: string, cursor?: number) {
+    return this.attachWithCleanup(actor, sessionId, cursor).snapshot;
+  }
+  /** Exact reader ownership for transport cleanup. A stale stream cannot detach a replacement. */
+  attachWithCleanup(actor: Actor, sessionId: string, cursor?: number) {
     const session = this.get(actor, sessionId);
     if (!session.readers.has(actor.id) && session.readers.size >= 16)
       fault("LIMIT", "Session reader limit reached.");
-    session.readers.set(actor.id, Date.now() + 60000);
+    const reader = { expires: Date.now() + 60000, epoch: Object.freeze({}) };
+    session.readers.set(actor.id, reader);
     // Serialize snapshot and cursor within the same queue that commits mirrored output.
     const snapshot = session.pending.then(() => {
       this.get(actor, sessionId);
@@ -351,7 +356,16 @@ export class Sessions {
       () => {},
       () => {},
     );
-    return snapshot;
+    let detached = false;
+    return Object.freeze({
+      snapshot,
+      detach: () => {
+        if (detached) return;
+        detached = true;
+        if (this.sessions.get(sessionId) === session && session.readers.get(actor.id) === reader)
+          this.detachInternal(session, actor.id);
+      },
+    });
   }
   read(actor: Actor, sessionId: string, cursor = 0) {
     const s = this.get(actor, sessionId);
@@ -385,7 +399,8 @@ export class Sessions {
       fault("WRITER_BUSY", "Another authenticated client holds the input lease.");
     s.info.writer = actor.id;
     s.writerUntil = Date.now() + 30000;
-    s.readers.set(actor.id, Date.now() + 60000);
+    const reader = s.readers.get(actor.id);
+    if (reader) reader.expires = Date.now() + 60000;
     this.changed(s);
     return { ...s.info };
   }
@@ -399,7 +414,8 @@ export class Sessions {
     if (s.channel.writableLength > 65536)
       fault("BACKPRESSURE", "Terminal input is backpressured; wait before retrying.");
     s.writerUntil = Date.now() + 30000;
-    s.readers.set(actor.id, Date.now() + 60000);
+    const reader = s.readers.get(actor.id);
+    if (reader) reader.expires = Date.now() + 60000;
     s.channel.write(data);
     return { accepted: Buffer.byteLength(data) };
   }

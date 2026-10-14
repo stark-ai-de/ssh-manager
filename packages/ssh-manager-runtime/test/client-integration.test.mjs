@@ -776,3 +776,30 @@ test("cached registered connect joins its original held physical tail", async ()
   assert.equal(await connected, client);
   await client.close();
 });
+
+test("host prepublication close can retain its original ordinary class after connect returns", async () => {
+  const classes = [];
+  const transport = {
+    start(request) {
+      classes.push(request.capacityClass);
+      return {
+        result: Promise.resolve({
+          ok: true,
+          body: request.path === "/v1/clients" ? registration : { data: { detached: true } },
+        }),
+        settled: Promise.resolve(),
+        sent: true,
+        responseComplete: true,
+        cancel() {},
+      };
+    },
+  };
+  const client = new ManagementClient("http://127.0.0.1:1/", "b".repeat(43), {
+    transport,
+    automaticHeartbeat: false,
+    strictCleanup: true,
+  });
+  await client.connect({ joinPhysical: true });
+  await client.close({ capacityClass: "ordinary" });
+  assert.deepEqual(classes, ["ordinary", "ordinary"]);
+});
