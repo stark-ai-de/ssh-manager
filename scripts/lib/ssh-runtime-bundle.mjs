@@ -14,6 +14,25 @@ function dependencyManifest(file) {
     throw new Error("Dependency package metadata could not be read as valid JSON.");
   }
 }
+// Audited public SDK implementation, not an unreleased upstream dependency.
+// Updating any of these requires rechecking docs/mcp-lifecycle.md and its tests.
+export function verifyMcpSdkCompatibility(root) {
+  const require = createRequire(path.join(root, "packages/ssh-manager-mcp/package.json"));
+  const directory = path.dirname(require.resolve("@modelcontextprotocol/server/stdio"));
+  const metadata = dependencyManifest(path.join(directory, "../package.json"));
+  if (metadata.version !== "2.3.1")
+    throw new Error("MCP SDK lifecycle audit requires published SDK 2.3.1.");
+  for (const [name, expected] of Object.entries({
+    "stdio.mjs": "43a68ba2ed4569e6b35d436a7dd94ab32a31d49d6c00df8337e244f8b0a4f956",
+    "mcp-DIH4cS6P.mjs": "2657fbeaebe76ef461e8d0860308da4c3404d2d3b6b1f06960b8ffc578fec1b4",
+    "src-Cqbh3MYc.mjs": "bc81a674f25546e2a631a5f3c9cb1829654bbfcdd40cb89823aab5fb719211e5",
+  })) {
+    if (sha256(fs.readFileSync(path.join(directory, name))) !== expected)
+      throw new Error(
+        "MCP SDK lifecycle source changed; review its completion contract before building.",
+      );
+  }
+}
 export function runtimeSourceFiles(root) {
   const files = [
     "pnpm-lock.yaml",
@@ -38,6 +57,7 @@ export function runtimeSourceFiles(root) {
   return files.sort();
 }
 export function buildRuntimeBundle({ root, output, dependencyRoot = root }) {
+  verifyMcpSdkCompatibility(dependencyRoot);
   if (
     sha256(fs.readFileSync(path.join(root, "pnpm-lock.yaml"))) !==
     sha256(fs.readFileSync(path.join(dependencyRoot, "pnpm-lock.yaml")))

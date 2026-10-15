@@ -3,9 +3,11 @@ import type { Transport, JSONRPCMessage, MessageExtraInfo } from "@modelcontextp
 import { APIError, ManagementClient, clientJsonBytes } from "@stark-ai/ssh-manager-runtime/client";
 import type { McpIntegrationOptions } from "./server.js";
 import { createMcpServer } from "./server.js";
+import { createManagementStdioTransport } from "./stdio-transport.js";
+export { createManagementStdioTransport } from "./stdio-transport.js";
 
-export const supportsReusableManagementStdio =
-  "supportsInboundMessageCompletion" in sdk && sdk.supportsInboundMessageCompletion === true;
+// Owned here on the published, audited SDK 2.3.1. No unreleased SDK hook.
+export const supportsReusableManagementStdio = true;
 
 export interface ManagementStdioOptions {
   /** Trusted embedding owns endpoint discovery and bootstrap provenance. No launcher fallback. */
@@ -13,7 +15,7 @@ export interface ManagementStdioOptions {
   transport?: Transport;
   legacy?: "serve" | "reject";
   maxSubscriptions?: number;
-  /** Reusable concurrent admission requires the upstream SDK completion seam. */
+  /** Reusable concurrent admission; defaults to eight requests / sixteen messages. */
   admission?: { maxRequests: number; maxMessages: number };
   onerror?: () => void | Promise<void>;
   beforeCall?: McpIntegrationOptions["beforeCall"];
@@ -27,42 +29,61 @@ export interface ManagementStdioOptions {
 }
 export interface ManagementStdioHandle {
   close(): Promise<void>;
+  /** Counts only; no actor credentials, request IDs or invocation data. */
+  usage(): Readonly<{
+    requests: number;
+    messages: number;
+    handlers: number;
+    queuedMessages: number;
+    clients: number;
+    factories: number;
+    calls: number;
+    waitingCalls: number;
+    outputMessages: number;
+    outputBytes: number;
+  }>;
 }
 
 export function serveManagementStdio(options: ManagementStdioOptions): ManagementStdioHandle {
-  if (options.admission) {
-    for (const value of [options.admission.maxRequests, options.admission.maxMessages])
-      if (!Number.isSafeInteger(value) || value < 1)
-        throw new APIError("INVALID_ARGUMENT", "Invalid MCP admission policy.");
-    if (
-      !("supportsInboundMessageCompletion" in sdk) ||
-      sdk.supportsInboundMessageCompletion !== true
-    )
-      throw new APIError(
-        "UNSUPPORTED_SDK",
-        "This MCP admission policy requires SDK processing completion support.",
-      );
-  }
-  const wire =
-    options.transport ??
-    new sdk.StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: 1048576 });
+  const admission = options.admission ?? { maxRequests: 8, maxMessages: 16 };
+  for (const value of [admission.maxRequests, admission.maxMessages])
+    if (!Number.isSafeInteger(value) || value < 1)
+      throw new APIError("INVALID_ARGUMENT", "Invalid MCP admission policy.");
+  const maxSubscriptions = options.maxSubscriptions ?? admission.maxRequests;
+  if (!Number.isSafeInteger(maxSubscriptions) || maxSubscriptions < 0)
+    throw new APIError("INVALID_ARGUMENT", "Invalid MCP subscription policy.");
+  const wire = options.transport ?? createManagementStdioTransport();
   const clients = new Map<ManagementClient, Promise<void> | undefined>();
   const factories = new Set<Promise<unknown>>();
-  const requests = new Set<string | number>();
+  type Inbound = {
+    message: JSONRPCMessage;
+    extra?: MessageExtraInfo;
+    entered: boolean;
+    handlers: number;
+    handlerTail?: Promise<unknown>;
+    writes: number;
+    subscription: boolean;
+    checkpoint?: NodeJS.Immediate;
+  };
+  const requests = new Map<string | number, Inbound>();
+  const records = new Set<Inbound>();
+  const queue: Inbound[] = [];
+  const handlerTails = new Set<Promise<unknown>>();
+  const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
   const output = options.output ?? {
     messageBytes: 67108864,
     queuedBytes: 100663296,
     maxMessages: 16,
   };
-  for (const value of Object.values(output))
+  for (const value of [output.messageBytes, output.queuedBytes, output.maxMessages])
     if (!Number.isSafeInteger(value) || value < 1)
       throw new APIError("INVALID_ARGUMENT", "Invalid MCP output policy.");
-  const input = options.input;
+  const input = options.input ?? { messageBytes: 1048576, maxMessages: 64, windowMs: 1000 };
   if (input)
-    for (const value of Object.values(input))
+    for (const value of [input.messageBytes, input.maxMessages, input.windowMs])
       if (!Number.isSafeInteger(value) || value < 1)
         throw new APIError("INVALID_ARGUMENT", "Invalid MCP input policy.");
-  const work = options.work;
+  const work = options.work ?? { maxCalls: 2, maxWaiting: 8 };
   if (work)
     for (const value of [work.maxCalls, work.maxWaiting])
       if (!Number.isSafeInteger(value) || value < 1)
@@ -143,9 +164,39 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
   let outputBytes = 0;
   let outputMessages = 0;
   let writeTail: Promise<void> = Promise.resolve();
-  let messages = 0;
   let closed = false;
   let closing: Promise<void> | undefined;
+  let pumping: Promise<void> | undefined;
+  // The exact SDK audit is documented in docs/mcp-lifecycle.md. A checkpoint
+  // drains finite SDK promise continuations AFTER actual owned tails. It is
+  // never a timeout, a response-only refund or a cancellation acknowledgement.
+  const reconsider = (record: Inbound) => {
+    if (!records.has(record) || record.checkpoint) return;
+    record.checkpoint = setImmediate(() => {
+      record.checkpoint = undefined;
+      if (!record.entered || record.handlers || record.writes || record.subscription) return;
+      records.delete(record);
+      if ("id" in record.message && "method" in record.message) requests.delete(record.message.id);
+    });
+  };
+  const trackRequest: NonNullable<McpIntegrationOptions["trackRequest"]> = (context, run) => {
+    const record = requests.get(context.mcpReq.id);
+    if (!record) {
+      deny();
+      return Promise.reject(new APIError("NOT_CONNECTED", "MCP request has no admission owner."));
+    }
+    record.handlers++;
+    const done = Promise.resolve()
+      .then(run)
+      .finally(() => {
+        record.handlers--;
+        handlerTails.delete(done);
+        reconsider(record);
+      });
+    handlerTails.add(done);
+    record.handlerTail = done;
+    return done;
+  };
   const report = () => {
     try {
       void Promise.resolve(options.onerror?.()).catch(() => {});
@@ -189,6 +240,22 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
         deny();
         return Promise.reject(new APIError("LIMIT", "MCP output queue limit reached."));
       }
+      const subscriptionId =
+        "method" in message
+          ? message.params?._meta?.["io.modelcontextprotocol/subscriptionId"]
+          : undefined;
+      const record =
+        "id" in message && message.id !== undefined
+          ? requests.get(message.id)
+          : typeof subscriptionId === "string" || typeof subscriptionId === "number"
+            ? requests.get(subscriptionId)
+            : undefined;
+      if (record) {
+        record.writes++;
+        if ("method" in message && message.method === "notifications/subscriptions/acknowledged")
+          record.subscription = true;
+        else if ("id" in message) record.subscription = false;
+      }
       outputBytes += bytes;
       outputMessages++;
       const done = writeTail
@@ -196,62 +263,97 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
         .finally(() => {
           outputBytes -= bytes;
           outputMessages--;
+          if (record) {
+            record.writes--;
+            reconsider(record);
+          }
         });
-      writeTail = done.catch(() => {});
+      writeTail = done.catch(() => {
+        deny();
+      });
       return done;
     },
     close: () => wire.close(),
   };
+  // SDK serveStdio's private pump never has a backlog: one entry at a time,
+  // with factory and actual output barriers. Tool handlers can keep running.
+  const pumpInput = async () => {
+    while (queue.length && !closed) {
+      const record = queue.shift()!;
+      transport.onmessage?.(record.message, record.extra);
+      do {
+        await Promise.allSettled([
+          ...factories,
+          writeTail,
+          ...("method" in record.message &&
+          record.message.method === "server/discover" &&
+          record.handlerTail
+            ? [record.handlerTail]
+            : []),
+        ]);
+        await nextTurn();
+      } while (
+        factories.size ||
+        outputMessages ||
+        ("method" in record.message &&
+          record.message.method === "server/discover" &&
+          record.handlers)
+      );
+      record.entered = true;
+      if ("method" in record.message && record.message.method === "notifications/cancelled") {
+        const id = record.message.params?.requestId;
+        const subscription =
+          typeof id === "string" || typeof id === "number" ? requests.get(id) : undefined;
+        // The audited entry has now actually applied router.cancel, including
+        // any preceding ACK/write. A received cancellation alone proves nothing.
+        if (subscription?.subscription) {
+          subscription.subscription = false;
+          reconsider(subscription);
+        }
+      }
+      reconsider(record);
+    }
+  };
   wire.onmessage = (message: JSONRPCMessage, extra?: MessageExtraInfo) => {
     if (closed) return;
-    if (input) {
-      const now = performance.now();
-      if (now - windowStart >= input.windowMs) {
-        windowStart = now;
-        receivedMessages = 0;
-      }
-      try {
-        clientJsonBytes(message, input.messageBytes);
-      } catch {
-        deny();
-        return;
-      }
-      if (++receivedMessages > input.maxMessages) {
-        deny();
-        return;
-      }
+    const now = performance.now();
+    if (now - windowStart >= input.windowMs) {
+      windowStart = now;
+      receivedMessages = 0;
     }
-    if (!options.admission) {
-      transport.onmessage?.(message, extra);
+    try {
+      clientJsonBytes(message, input.messageBytes);
+    } catch {
+      deny();
       return;
     }
     const request = "id" in message && "method" in message;
-    const id = request ? message.id : undefined;
     if (
-      options.admission &&
-      (messages >= options.admission.maxMessages ||
-        (request && (requests.size >= options.admission.maxRequests || requests.has(id!))))
+      ++receivedMessages > input.maxMessages ||
+      records.size >= admission.maxMessages ||
+      (request && (requests.size >= admission.maxRequests || requests.has(message.id)))
     ) {
-      closed = true;
-      report();
-      void close().catch(report);
+      deny();
       return;
     }
-    messages++;
-    if (request) requests.add(id!);
-    let processed = false;
-    const onMessageProcessed = () => {
-      if (processed) return;
-      processed = true;
-      messages--;
-      if (request) requests.delete(id!);
-      // New metadata remains structural on older declarations; bounded mode
-      // refuses those SDK versions before transport.start, never faking refunds.
-      if (extra && "onMessageProcessed" in extra && typeof extra.onMessageProcessed === "function")
-        extra.onMessageProcessed();
+    const record: Inbound = {
+      message,
+      extra,
+      entered: false,
+      handlers: 0,
+      writes: 0,
+      subscription: false,
     };
-    const metadata = { ...extra, onMessageProcessed };
-    transport.onmessage?.(message, metadata);
+    records.add(record);
+    if (request) requests.set(message.id, record);
+    queue.push(record);
+    if (!pumping) {
+      pumping = pumpInput()
+        .catch(deny)
+        .finally(() => {
+          pumping = undefined;
+        });
+    }
   };
   wire.onerror = (error) => {
     transport.onerror?.(error);
@@ -278,6 +380,7 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
             throw new APIError("NOT_CONNECTED", "MCP owner is closed.");
           }
           const server = createMcpServer(client, {
+            trackRequest,
             beforeCall: async (operation, context, args) => {
               if (closed) throw new APIError("NOT_CONNECTED", "MCP owner is closed.");
               await options.beforeCall?.(operation, context, args);
@@ -297,7 +400,7 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
     {
       legacy: options.legacy ?? "serve",
       transport,
-      maxSubscriptions: options.maxSubscriptions,
+      maxSubscriptions,
       onerror: report,
     },
   );
@@ -311,12 +414,32 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
     }
     closing = (async () => {
       await (await handleReady).close();
+      await pumping;
+      await Promise.allSettled([...handlerTails, ...callTails, ...factories]);
       await writeTail;
-      await Promise.allSettled([...callTails]);
-      await Promise.allSettled([...factories]);
       await Promise.all([...clients.keys()].map(cleanup));
+      await nextTurn();
+      queue.length = 0;
+      for (const record of records) if (record.checkpoint) clearImmediate(record.checkpoint);
+      records.clear();
+      requests.clear();
     })();
     return closing;
   }
-  return { close };
+  return {
+    close,
+    usage: () =>
+      Object.freeze({
+        requests: requests.size,
+        messages: records.size,
+        handlers: handlerTails.size,
+        queuedMessages: queue.length,
+        clients: clients.size,
+        factories: factories.size,
+        calls: activeCalls,
+        waitingCalls: waiting.length,
+        outputMessages,
+        outputBytes,
+      }),
+  };
 }

@@ -18,7 +18,8 @@
     "artifact": "node scripts/ssh/export-artifact.mjs",
     "artifact:verify": "node scripts/ssh/verify-artifact.mjs",
     "format": "oxfmt --write .",
-    "format:check": "oxfmt --check ."
+    "format:check": "oxfmt --check .",
+    "test:mcp:duration": "node scripts/ssh/test-mcp-duration.mjs"
   },
   "devDependencies": {
     "esbuild": "0.28.2",

@@ -52,4 +52,4 @@ If startup fails, build first, check the Node version and state-directory owners
 
 ## Trusted embedding
 
-The configurable [public client/stdio integration](client-integration.md) preserves this catalog and the official SDK transport. Reusable bounded admission is explicitly blocked on the upstream SDK completion hook; standalone invocation remains compatible.
+The configurable [public client/stdio integration](client-integration.md) preserves this catalog and the official SDK transport. Reusable bounded admission operates on the unchanged published SDK 2.3.1 with lifecycle ownership in the SSH Manager. The [upstream completion-hook proposal is optional](mcp-lifecycle.md#optional-upstream-proposal); its merge is not a prerequisite. Standalone invocation uses the same bounded owner.

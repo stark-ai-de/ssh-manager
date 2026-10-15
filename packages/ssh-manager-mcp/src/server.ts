@@ -21,12 +21,25 @@ export interface McpIntegrationOptions {
     args: OperationInputs[Operation],
   ) => Promise<void>;
   onCleanupError?: () => void;
+  /** @internal Canonical stdio owns the entire SDK tool-handler tail, including validation. */
+  trackRequest?: <T>(context: ServerContext, run: () => T | Promise<T>) => Promise<T>;
 }
 export function createMcpServer(client: ManagementClient, options: McpIntegrationOptions = {}) {
-  const server = new McpServer(
-    { name: "stark-ssh-management", version: "1.0.0" },
-    { capabilities: { tools: {} } },
-  );
+  // registerTool declares the tools capability itself. Declaring it in the
+  // constructor would eagerly install handlers before the lifecycle observer.
+  const server = new McpServer({ name: "stark-ssh-management", version: "1.0.0" });
+  if (options.trackRequest) {
+    const register = server.server.setRequestHandler.bind(server.server);
+    type Handler = (params: unknown, context: ServerContext) => unknown;
+    // Decorate only the public registration API. The SDK still owns dispatch,
+    // schemas, tool registration and both wire revisions; no private fields.
+    server.server.setRequestHandler = ((method: string, ...args: unknown[]) => {
+      const handler = args.pop() as Handler;
+      const observed: Handler = (params, context) =>
+        options.trackRequest!(context, () => handler(params, context));
+      Reflect.apply(register, undefined, [method, ...args, observed]);
+    }) as typeof register;
+  }
   for (const [name, definition] of Object.entries(catalog)) {
     if (definition.operator) continue;
     server.registerTool(
