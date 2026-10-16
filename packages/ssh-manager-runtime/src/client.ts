@@ -10,6 +10,7 @@ import { parseOperationResult, type OperationResults } from "./outputs.js";
 import {
   createClientTransport,
   ClientTransportError,
+  isClientControlPath,
   serializeClientJson,
 } from "./client-transport.js";
 import type {
@@ -44,6 +45,8 @@ export class APIError extends Error {
     this.name = "APIError";
   }
 }
+// Only a fully validated remote error may bypass local response-failure revocation.
+class RemoteAPIError extends APIError {}
 export type ClientCallOptions = {
   signal?: AbortSignal;
   timeout?: number;
@@ -136,6 +139,7 @@ export class ManagementClient {
   #cleanupSettled = false;
   #invalid = false;
   #pending = new Set<ClientExchange>();
+  #revocations = new WeakMap<ClientExchange, () => void>();
   #streams = new Set<SessionStream>();
   #ordinary = 0;
   #control = 0;
@@ -156,8 +160,10 @@ export class ManagementClient {
   get registration(): ClientRegistration | undefined {
     return this.#closed || this.#invalid ? undefined : this.#identity;
   }
-  #invalidate() {
-    if (!this.options.strictLifecycle && !this.options.authority) return;
+  #invalidate(exchange?: ClientExchange) {
+    const revoke = exchange?.sent ? this.#revocations.get(exchange) : undefined;
+    revoke?.();
+    if (!this.options.strictLifecycle && !this.options.authority && !revoke) return;
     if (this.#invalid) return;
     this.#invalid = true;
     clearInterval(this.#timer);
@@ -203,26 +209,51 @@ export class ManagementClient {
         : Object.hasOwn(catalog, method)
           ? 16777216
           : 16384;
-    const authority = options.authority ?? this.options.authority?.(path, options);
-    authority?.assertCurrent();
-    const signal = AbortSignal.any([
-      AbortSignal.timeout(options.timeout ?? 30000),
-      ...(options.signal && !options.retainSent ? [options.signal] : []),
-    ]);
-    const control =
-      options.capacityClass === "control" ||
-      (options.capacityClass === undefined &&
-        (path === "/v1/clients/heartbeat" || path === "/v1/clients/detach"));
-    if (this.options.capacity) {
-      for (const value of Object.values(this.options.capacity))
-        if (!Number.isSafeInteger(value) || value < 1)
-          throw new APIError("INVALID_ARGUMENT", "Invalid client capacity.");
+    const capacityClass =
+      options.capacityClass === undefined
+        ? path === "/v1/clients/heartbeat" || path === "/v1/clients/detach"
+          ? "control"
+          : "ordinary"
+        : options.capacityClass;
+    if (
+      (capacityClass !== "ordinary" && capacityClass !== "control") ||
+      (capacityClass === "control" && !isClientControlPath(path))
+    )
+      throw new APIError("INVALID_ARGUMENT", "Invalid client capacity class for this route.");
+    const control = capacityClass === "control";
+    if (this.options.capacity !== undefined) {
+      const capacity = this.options.capacity;
+      if (
+        !capacity ||
+        [capacity.ordinary, capacity.control].some(
+          (value) => !Number.isSafeInteger(value) || value < 1,
+        )
+      )
+        throw new APIError("INVALID_ARGUMENT", "Invalid client capacity.");
       if (
         (control ? this.#control : this.#ordinary) >=
         (control ? this.options.capacity.control : this.options.capacity.ordinary)
       )
         throw new APIError("LIMIT", "Client physical exchange capacity reached.");
     }
+    const authority = options.authority ?? this.options.authority?.(path, options);
+    authority?.assertCurrent();
+    const timeout = options.timeout ?? (options.upload || options.download ? undefined : 30000);
+    const signal = AbortSignal.any([
+      ...(timeout === undefined ? [] : [AbortSignal.timeout(timeout)]),
+      ...(options.signal && !options.retainSent ? [options.signal] : []),
+    ]);
+    // Both transport failures and local decoder failures revoke this exact owner once.
+    let revoked = false;
+    const revoke = () => {
+      if (revoked) return;
+      revoked = true;
+      try {
+        authority?.invalidate();
+      } catch {
+        /* Revocation reporting cannot interrupt cleanup. */
+      }
+    };
     const exchange = this.#transport.start({
       url: this.url + "/",
       path,
@@ -240,8 +271,16 @@ export class ManagementClient {
       signal,
       abandonSignal: options.retainSent ? options.signal : undefined,
       capacityClass: control ? "control" : "ordinary",
-      authority,
+      authority: authority && {
+        assertCurrent: () => authority.assertCurrent(),
+        beforeConnect: authority.beforeConnect ? () => authority.beforeConnect!() : undefined,
+        beforeSend: (socket) => authority.beforeSend(socket),
+        afterResponse: (socket) => authority.afterResponse(socket),
+        sent: () => authority.sent?.(),
+        invalidate: revoke,
+      },
     });
+    if (authority) this.#revocations.set(exchange, revoke);
     this.#pending.add(exchange);
     if (control) this.#control++;
     else this.#ordinary++;
@@ -252,7 +291,7 @@ export class ManagementClient {
     };
     void exchange.settled.then(retire, () => {
       retire();
-      this.#invalidate();
+      this.#invalidate(exchange);
     });
     try {
       this.options.onExchange?.(exchange, authority);
@@ -263,6 +302,14 @@ export class ManagementClient {
     }
     return { exchange, authority };
   }
+  #responseError(exchange: ClientExchange, error: unknown): APIError {
+    if (error instanceof RemoteAPIError) return error;
+    if (exchange.sent) this.#invalidate(exchange);
+    if (error instanceof APIError) return error;
+    return error instanceof ClientTransportError
+      ? new APIError(error.code, error.message)
+      : new APIError("API_RESPONSE", "Management API returned an invalid response.");
+  }
   async #decode(exchange: ClientExchange): Promise<Record<string, unknown>> {
     try {
       const response = object(await exchange.result);
@@ -272,7 +319,7 @@ export class ManagementClient {
         const error = object(body.error);
         if (typeof error.code !== "string" || typeof error.message !== "string")
           throw new APIError("API_RESPONSE", "Management API returned an invalid response.");
-        throw new APIError(
+        throw new RemoteAPIError(
           error.code,
           error.message,
           error.details === undefined ? undefined : object(error.details),
@@ -280,13 +327,7 @@ export class ManagementClient {
       }
       return body;
     } catch (error) {
-      if (error instanceof ClientTransportError) {
-        if (error.sent) this.#invalidate();
-        throw new APIError(error.code, error.message);
-      }
-      if (error instanceof APIError) throw error;
-      if (exchange.sent) this.#invalidate();
-      throw new APIError("API_RESPONSE", "Management API returned an invalid response.");
+      throw this.#responseError(exchange, error);
     }
   }
   connect(input?: AbortSignal | ClientCallOptions): Promise<this> {
@@ -323,7 +364,8 @@ export class ManagementClient {
         return this;
       });
     }
-    if (!this.#connecting) {
+    const ownsRegistration = !this.#connecting;
+    if (ownsRegistration) {
       const attempt = this.#register(options);
       this.#connecting = attempt;
       void attempt.catch(() => {
@@ -336,7 +378,7 @@ export class ManagementClient {
           this.#connecting = undefined;
       });
     }
-    const connected = this.#connecting.then(() => {
+    const connected = this.#connecting!.then(() => {
       if (this.#closed || this.#invalid || signal?.aborted)
         throw new APIError("NOT_CONNECTED", "This API client is no longer attached.");
       return this;
@@ -351,7 +393,8 @@ export class ManagementClient {
         if (options.joinPhysical) await this.#registrationExchange?.settled;
       }
     };
-    if (!signal || !this.options.retainSentRegistration) return joined(connected);
+    if (!signal || (ownsRegistration && !this.options.retainSentRegistration))
+      return joined(connected);
     return joined(
       new Promise<this>((resolve, reject) => {
         let completed = false;
@@ -359,10 +402,12 @@ export class ManagementClient {
           if (completed) return;
           completed = true;
           signal.removeEventListener("abort", abandon);
-          this.#registrationAbandoned = true;
-          this.#abandonedRegistrationAuthority = this.#registrationAuthority;
-          // Closing becomes effective synchronously; only the private sent cleanup continues.
-          void this.close().catch(() => {});
+          if (ownsRegistration) {
+            this.#registrationAbandoned = true;
+            this.#abandonedRegistrationAuthority = this.#registrationAuthority;
+            // Only the registration owner can abandon its private sent cleanup.
+            void this.close().catch(() => {});
+          }
           reject(new APIError("CANCELLED_OR_TIMEOUT", "Registration caller was cancelled."));
         };
         if (signal.aborted) abandon();
@@ -445,47 +490,52 @@ export class ManagementClient {
       }
       return this;
     } catch (error) {
-      if (exchange.sent) this.#invalidate();
-      throw error;
+      // Preserve strict registration failure semantics without revoking an owner
+      // for a structurally valid remote domain error.
+      if (error instanceof RemoteAPIError && exchange.sent) this.#invalidate();
+      throw this.#responseError(exchange, error);
     }
   }
-  async #request(
+  async #request<T>(
     path: string,
     body: unknown,
-    options: ClientCallOptions & { closing?: boolean } = {},
-  ) {
+    options: ClientCallOptions & { closing?: boolean },
+    decode: (response: Record<string, unknown>) => T,
+  ): Promise<T> {
     const { exchange, authority } = this.#start(path, body, options);
     try {
       const response = await this.#decode(exchange);
       authority?.assertCurrent();
-      return response;
+      return decode(response);
+    } catch (error) {
+      throw this.#responseError(exchange, error);
     } finally {
       if (options.joinPhysical) await exchange.settled;
     }
   }
   async heartbeat(options: ClientCallOptions = {}) {
-    const reply = await this.#request(
+    await this.#request(
       "/v1/clients/heartbeat",
       {},
       { ...options, timeout: options.timeout ?? 5000 },
+      (reply) => {
+        if (object(reply.data).alive !== true)
+          throw new APIError("API_RESPONSE", "Management API rejected the client heartbeat.");
+      },
     );
-    if (object(reply.data).alive !== true) {
-      this.#invalidate();
-      throw new APIError("API_RESPONSE", "Management API rejected the client heartbeat.");
-    }
   }
   async call<K extends Operation>(
     operation: K,
     args: OperationInputs[K],
     options: ClientCallOptions = {},
   ): Promise<OperationResults[K]> {
-    const response = await this.#request(`/v1/${operation}`, args, options);
-    try {
-      return parseOperationResult(operation, response);
-    } catch {
-      this.#invalidate();
-      throw new APIError("API_RESPONSE", "Management API returned an invalid operation result.");
-    }
+    return this.#request(`/v1/${operation}`, args, options, (response) => {
+      try {
+        return parseOperationResult(operation, response);
+      } catch {
+        throw new APIError("API_RESPONSE", "Management API returned an invalid operation result.");
+      }
+    });
   }
   async download(targetId: string, path: string, input?: AbortSignal | TransferOptions) {
     const options = transferOptions(input);
@@ -494,10 +544,16 @@ export class ManagementClient {
       undefined,
       { ...options, method: "GET", download: true },
     );
-    const reply = await this.#decode(exchange);
-    authority?.assertCurrent();
-    const stream = reply.stream as ReadableStream<Uint8Array>;
-    return options.progress ? stream.pipeThrough(progressStream(options.progress)) : stream;
+    try {
+      const reply = await this.#decode(exchange);
+      authority?.assertCurrent();
+      if (!(reply.stream instanceof ReadableStream))
+        throw new APIError("API_RESPONSE", "Management API returned an invalid download stream.");
+      const stream = reply.stream as ReadableStream<Uint8Array>;
+      return options.progress ? stream.pipeThrough(progressStream(options.progress)) : stream;
+    } catch (error) {
+      throw this.#responseError(exchange, error);
+    }
   }
   async upload(
     targetId: string,
@@ -515,16 +571,20 @@ export class ManagementClient {
         upload: options.progress ? stream.pipeThrough(progressStream(options.progress)) : stream,
       },
     );
-    const reply = await this.#decode(exchange);
-    authority?.assertCurrent();
-    if (object(reply.data).completed !== true)
-      throw new APIError("API_RESPONSE", "Management API returned an invalid transfer result.");
-    return { completed: true };
+    try {
+      const reply = await this.#decode(exchange);
+      authority?.assertCurrent();
+      if (object(reply.data).completed !== true)
+        throw new APIError("API_RESPONSE", "Management API returned an invalid transfer result.");
+      return { completed: true };
+    } catch (error) {
+      throw this.#responseError(exchange, error);
+    }
   }
   async stopRuntime(options: ClientCallOptions = {}) {
     if (this.#identity?.kind !== "operator")
       throw new APIError("FORBIDDEN", "Runtime stop requires operator authority.");
-    return this.#request("/v1/runtime/stop", {}, options);
+    return this.#request("/v1/runtime/stop", {}, options, (reply) => reply);
   }
   watchSession(sessionId: string, options: SessionStreamOptions): SessionStream {
     if (this.#closed || this.#invalid || !this.#token)
@@ -557,11 +617,12 @@ export class ManagementClient {
         exchange.cancel();
     this.#closing = (async () => {
       try {
-        await Promise.all([
+        const tails = await Promise.allSettled([
           ...pending.map((exchange) => exchange.settled),
           ...[...this.#streams].map((stream) => stream.close()),
         ]);
         await this.#connecting?.catch(() => {});
+        for (const tail of tails) if (tail.status === "rejected") throw tail.reason;
         if (this.#token) {
           const { exchange } = this.#start(
             "/v1/clients/detach",
@@ -578,11 +639,13 @@ export class ManagementClient {
           let response: Record<string, unknown>;
           try {
             response = await this.#decode(exchange);
+            if (object(response.data).detached !== true)
+              throw new APIError("API_RESPONSE", "Management API did not confirm client detach.");
+          } catch (error) {
+            throw this.#responseError(exchange, error);
           } finally {
             await exchange.settled;
           }
-          if (object(response.data).detached !== true)
-            throw new APIError("API_RESPONSE", "Management API did not confirm client detach.");
         }
         this.#token = undefined;
         this.#identity = undefined;

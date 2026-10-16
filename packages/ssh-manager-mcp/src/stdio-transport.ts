@@ -1,6 +1,6 @@
 import { Writable, finished, type Readable } from "node:stream";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
-import type { Transport } from "@modelcontextprotocol/server";
+import { deserializeMessage, type Transport } from "@modelcontextprotocol/server";
 
 /**
  * Keep the official SDK framing/decoder and join the real Writable callback.
@@ -33,6 +33,42 @@ export function createManagementStdioTransport(
     },
   });
   const wire = new StdioServerTransport(input, sink, { maxBufferSize });
+  // SDK 2.3.1's ReadBuffer silently skips JSON syntax errors. Inspect bounded
+  // lines with its public decoder before dispatch so those errors also fail closed.
+  // StdioServerTransport still owns all protocol framing and message delivery.
+  let pendingInput: Buffer = Buffer.alloc(0);
+  let inputFailed = false;
+  const rejectInput = () => {
+    if (inputFailed) return;
+    inputFailed = true;
+    pendingInput = Buffer.alloc(0);
+    try {
+      transport.onerror?.(new Error("Invalid MCP input frame."));
+    } finally {
+      void transport.close().catch(() => {});
+    }
+  };
+  const inspectInput = (chunk: Buffer | string) => {
+    if (inputFailed) return;
+    try {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (pendingInput.length + bytes.length > maxBufferSize) {
+        rejectInput();
+        return;
+      }
+      pendingInput = pendingInput.length ? Buffer.concat([pendingInput, bytes]) : bytes;
+      let newline: number;
+      while ((newline = pendingInput.indexOf("\n")) !== -1) {
+        deserializeMessage(pendingInput.toString("utf8", 0, newline).replace(/\r$/, ""));
+        pendingInput = pendingInput.subarray(newline + 1);
+      }
+    } catch {
+      rejectInput();
+    }
+  };
+  const inspectEnd = () => {
+    if (pendingInput.length) rejectInput();
+  };
   const outputError = (error: Error) => sink.destroy(error);
   let outputSettled: Promise<void> | undefined;
   let unobserveOutput: (() => void) | undefined;
@@ -52,9 +88,13 @@ export function createManagementStdioTransport(
     start: async () => {
       output.on("error", outputError);
       observeOutput();
-      wire.onmessage = (message) => transport.onmessage?.(message);
+      wire.onmessage = (message) => {
+        if (!inputFailed) transport.onmessage?.(message);
+      };
       wire.onerror = (error) => transport.onerror?.(error);
       wire.onclose = () => transport.onclose?.();
+      input.on("data", inspectInput);
+      input.on("end", inspectEnd);
       await wire.start();
     },
     send: (message) => {
@@ -75,6 +115,9 @@ export function createManagementStdioTransport(
     },
     close: async () => {
       try {
+        input.off("data", inspectInput);
+        input.off("end", inspectEnd);
+        pendingInput = Buffer.alloc(0);
         await wire.close();
         await sends;
         await writing;

@@ -124,10 +124,12 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
     const execute = async () => {
       if (closed || context.mcpReq.signal.aborted)
         throw new APIError("NOT_CONNECTED", "MCP owner is closed.");
-      if (options.invoke) return options.invoke(operation, context, args, client);
       await client.connect({ signal: context.mcpReq.signal, joinPhysical: true });
+      if (context.mcpReq.signal.aborted)
+        throw new APIError("CANCELLED_OR_TIMEOUT", "MCP request cancelled.");
       if (closed || client.registration?.kind !== "agent")
         throw new APIError("FORBIDDEN", "MCP requires a registered agent client.");
+      if (options.invoke) return options.invoke(operation, context, args, client);
       return client.call(operation, args, { signal: context.mcpReq.signal, joinPhysical: true });
     };
     const run = () => {
@@ -356,7 +358,14 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
     }
   };
   wire.onerror = (error) => {
-    transport.onerror?.(error);
+    if (closed) return;
+    // The official decoder rejects malformed frames before onmessage/budget admission.
+    closed = true;
+    try {
+      transport.onerror?.(error);
+    } finally {
+      void close().catch(report);
+    }
   };
   wire.onclose = () => {
     closed = true;
@@ -417,7 +426,8 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
       await pumping;
       await Promise.allSettled([...handlerTails, ...callTails, ...factories]);
       await writeTail;
-      await Promise.all([...clients.keys()].map(cleanup));
+      const cleanups = await Promise.allSettled([...clients.keys()].map(cleanup));
+      for (const result of cleanups) if (result.status === "rejected") throw result.reason;
       await nextTurn();
       queue.length = 0;
       for (const record of records) if (record.checkpoint) clearImmediate(record.checkpoint);

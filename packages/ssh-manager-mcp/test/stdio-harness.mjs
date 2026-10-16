@@ -11,6 +11,30 @@ export const modernMeta = {
 export const tick = async () => {
   for (let i = 0; i < 3; i++) await new Promise((resolve) => setImmediate(resolve));
 };
+// Synthetic transport, real ManagementClient registration/role validation. No SSH claim.
+export function fixtureClient(options = {}, kind = "agent") {
+  return new ManagementClient("http://127.0.0.1:1", "b".repeat(43), {
+    automaticHeartbeat: false,
+    transport: {
+      start(request) {
+        const data =
+          request.path === "/v1/clients"
+            ? { token: "t".repeat(43), actor: { id: "fixture-actor", kind }, expiresInMs: 120000 }
+            : request.path === "/v1/clients/detach"
+              ? { detached: true }
+              : { alive: true };
+        return {
+          result: Promise.resolve({ ok: true, body: { data } }),
+          settled: Promise.resolve(),
+          sent: true,
+          responseComplete: true,
+          cancel() {},
+        };
+      },
+    },
+    ...options,
+  });
+}
 export async function mcpHarness(
   t,
   { era = "legacy", initialize = true, factory, ...options } = {},
@@ -27,9 +51,7 @@ export async function mcpHarness(
       else callback();
     },
   });
-  const client = new ManagementClient("http://127.0.0.1:1", "b".repeat(43), {
-    automaticHeartbeat: false,
-  });
+  const client = fixtureClient();
   const handle = serveManagementStdio({
     transport: createManagementStdioTransport(input, output),
     input: { messageBytes: 1048576, maxMessages: 65536, windowMs: 1000 },

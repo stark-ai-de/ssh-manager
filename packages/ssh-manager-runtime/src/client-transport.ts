@@ -44,6 +44,10 @@ export interface ClientExchange {
 export interface ClientTransport {
   start(request: ClientTransportRequest): ClientExchange;
 }
+/** Shared route policy for the client and independently usable transport. */
+export function isClientControlPath(path: string): boolean {
+  return ["/v1/clients/heartbeat", "/v1/clients/detach", "/v1/ssh_session_detach"].includes(path);
+}
 const exchangeOwners = new WeakMap<ClientExchange, ClientTransport>();
 /** Origin only: this does not prove native authority, an admission ticket or settlement. */
 export function isClientExchangeForTransport(
@@ -185,7 +189,7 @@ export function createClientTransport(
   const transport: ClientTransport = {
     start(input) {
       let admitted = false;
-      const capacityClass = input.capacityClass ?? "ordinary";
+      const capacityClass = input.capacityClass === undefined ? "ordinary" : input.capacityClass;
       let sent = false;
       let responseComplete = false;
       let req: ClientRequest | undefined;
@@ -241,12 +245,7 @@ export function createClientTransport(
         try {
           if (capacityClass !== "ordinary" && capacityClass !== "control")
             throw new ClientTransportError("API_RESPONSE", false);
-          if (
-            capacityClass === "control" &&
-            !["/v1/clients/heartbeat", "/v1/clients/detach", "/v1/ssh_session_detach"].includes(
-              input.path,
-            )
-          )
+          if (capacityClass === "control" && !isClientControlPath(input.path))
             throw new ClientTransportError("API_RESPONSE", false);
           if (options.capacity && active[capacityClass] >= options.capacity[capacityClass])
             throw new ClientTransportError("LIMIT", false);

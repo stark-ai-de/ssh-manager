@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { fileURLToPath } from "node:url";
 import type { ManagementClient, ClientCallOptions } from "./client.js";
 import type { OperationInputs } from "./catalog.js";
 import path from "node:path";
@@ -128,10 +127,7 @@ async function main() {
     await client.close();
   }
 }
-if (
-  process.argv[1] &&
-  fs.realpathSync(path.resolve(process.argv[1])) === fileURLToPath(import.meta.url)
-)
+if (import.meta.main)
   void main().catch((error) => {
     console.error(
       error.code

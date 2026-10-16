@@ -10,7 +10,7 @@ import {
   supportsReusableManagementStdio,
 } from "../dist/stdio.js";
 import { catalog } from "@stark-ai/ssh-manager-runtime/catalog";
-import { mcpHarness, tick } from "./stdio-harness.mjs";
+import { fixtureClient, mcpHarness, tick } from "./stdio-harness.mjs";
 
 for (const era of ["legacy", "modern"]) {
   test(`${era}: published SDK supports canonical tools and thousands of reusable bounded requests`, async (t) => {
@@ -383,9 +383,7 @@ test("scoped invocation limits work to two and retains close through invocation 
     releaseCleanup = resolve;
   });
   let cleanupStarted = false;
-  const client = new ManagementClient("http://127.0.0.1:1", "b".repeat(43), {
-    automaticHeartbeat: false,
-  });
+  const client = fixtureClient();
   const wire = {
     async start() {},
     async close() {},
