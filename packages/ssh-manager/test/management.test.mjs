@@ -314,3 +314,25 @@ test("channel deadlines, concurrent profile invalidation and bounded pool waiter
   await assert.rejects(attempt);
   assert.equal(other.manager.connections(operator).length, 0);
 });
+
+test("late reader cleanup cannot detach a replacement or sacrifice another session", async (t) => {
+  const { manager, profile } = await managedFixture(t);
+  const session = await manager.sessions.create(agent, profile.id);
+  const first = manager.sessions.attachWithCleanup(agent, session.id);
+  await first.snapshot;
+  const replacement = manager.sessions.attachWithCleanup(agent, session.id);
+  await replacement.snapshot;
+  manager.sessions.writer(agent, session.id);
+  first.detach();
+  first.detach();
+  assert.doesNotThrow(() => manager.sessions.input(agent, session.id, "still-owned\r"));
+  const secondSession = await manager.sessions.create(agent, profile.id);
+  await manager.sessions.attach(agent, secondSession.id);
+  manager.sessions.writer(agent, secondSession.id);
+  replacement.detach();
+  replacement.detach();
+  assert.throws(() => manager.sessions.input(agent, session.id, "denied"), {
+    code: "WRITER_REQUIRED",
+  });
+  assert.doesNotThrow(() => manager.sessions.input(agent, secondSession.id, "other-binding\r"));
+});

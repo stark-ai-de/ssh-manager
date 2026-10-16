@@ -365,6 +365,7 @@ export async function createRuntime(
       }
       activeViewers++;
       let identity: Actor | undefined, sessionId: string | undefined;
+      let reader: ReturnType<typeof manager.sessions.attachWithCleanup> | undefined;
       let closed = false,
         queued = 0,
         messages = Promise.resolve();
@@ -403,9 +404,10 @@ export async function createRuntime(
               token = auth.token;
               identity = authenticate(token);
               sessionId = auth.sessionId;
-              const snapshot = await manager.sessions.attach(identity, sessionId);
+              reader = manager.sessions.attachWithCleanup(identity, sessionId);
+              const snapshot = await reader.snapshot;
               if (closed) {
-                manager.sessions.detach(identity, sessionId);
+                reader.detach();
                 return;
               }
               clearTimeout(authTimeout);
@@ -447,12 +449,10 @@ export async function createRuntime(
         activeViewers--;
         clearTimeout(authTimeout);
         manager.off("event", event);
-        if (identity && sessionId) {
-          try {
-            manager.sessions.detach(identity, sessionId);
-          } catch {
-            manager.detachActor(identity.id);
-          }
+        try {
+          reader?.detach();
+        } catch {
+          /* An uncertain stream cleanup never sacrifices other actor bindings. */
         }
       });
     });

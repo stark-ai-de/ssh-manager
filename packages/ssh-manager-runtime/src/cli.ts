@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import type { ManagementClient, ClientCallOptions } from "./client.js";
+import type { OperationInputs } from "./catalog.js";
 import path from "node:path";
 import { catalog, type Operation } from "./catalog.js";
 import { localClient, ensureRuntime } from "./launcher.js";
@@ -35,6 +37,26 @@ async function secretPrompt(label: string) {
     };
     process.stdin.on("data", data);
   });
+}
+export const supportsScopedManagementCli = true;
+export async function runManagementCliOperation<K extends Operation>(
+  operation: K,
+  input: unknown,
+  options: {
+    client: ManagementClient;
+    callOptions?: ClientCallOptions;
+    invoke?: (
+      operation: K,
+      input: OperationInputs[K],
+      client: ManagementClient,
+    ) => Promise<unknown>;
+  },
+) {
+  if (!Object.hasOwn(catalog, operation)) throw new Error("Choose a documented operation.");
+  const parsed = catalog[operation].schema.parse(input) as OperationInputs[K];
+  return options.invoke
+    ? options.invoke(operation, parsed, options.client)
+    : options.client.call(operation, parsed, { ...options.callOptions, joinPhysical: true });
 }
 async function main() {
   const args = process.argv.slice(2);
@@ -98,18 +120,19 @@ async function main() {
         if (confirmation !== (name === "ssh_host_confirm" ? input.fingerprint : name))
           throw new Error("Confirmation did not match.");
       }
-      result = await client.call(name, definition.schema.parse(input) as any);
+      result = await runManagementCliOperation(name, input, { client });
     }
     console.log(JSON.stringify(result, null, command === "operator" ? 2 : undefined));
   } finally {
     await client.close();
   }
 }
-void main().catch((error) => {
-  console.error(
-    error.code
-      ? `${error.code}: ${error.message}`
-      : "Local setup failed. Check the operation, argument file and interactive terminal.",
-  );
-  process.exitCode = 1;
-});
+if (import.meta.main)
+  void main().catch((error) => {
+    console.error(
+      error.code
+        ? `${error.code}: ${error.message}`
+        : "Local setup failed. Check the operation, argument file and interactive terminal.",
+    );
+    process.exitCode = 1;
+  });

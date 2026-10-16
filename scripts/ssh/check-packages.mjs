@@ -121,16 +121,54 @@ try {
     import assert from 'node:assert/strict';
     import { SSHManager } from '@stark-ai/ssh-manager';
     import { ManagementClient } from '@stark-ai/ssh-manager-runtime/client';
+    import { runManagementCliOperation, supportsScopedManagementCli } from '@stark-ai/ssh-manager-runtime/cli';
     import { createMcpServer } from '@stark-ai/ssh-manager-mcp';
     assert.equal(typeof SSHManager, 'function');
     assert.equal(typeof ManagementClient, 'function');
     assert.equal(typeof createMcpServer, 'function');
+    assert.equal(supportsScopedManagementCli, true);
+    assert.equal(typeof runManagementCliOperation, 'function');
+    assert.deepEqual(await runManagementCliOperation('ssh_hosts_list', {}, {
+      client: new ManagementClient('http://127.0.0.1:1', 'b'.repeat(43)),
+      invoke: async (operation, args) => ({ operation, args }),
+    }), { operation: 'ssh_hosts_list', args: {} });
   `,
     ],
     { cwd: consumer, stdio: "pipe", timeout: 30000 },
   );
+  const typeFixture = path.join(consumer, "cli-types.mts");
+  fs.writeFileSync(
+    typeFixture,
+    `
+    import { ManagementClient } from '@stark-ai/ssh-manager-runtime/client';
+    import { runManagementCliOperation, supportsScopedManagementCli } from '@stark-ai/ssh-manager-runtime/cli';
+    const supported: boolean = supportsScopedManagementCli;
+    declare const client: ManagementClient;
+    const result: Promise<unknown> = runManagementCliOperation('ssh_hosts_list', {}, { client });
+    // @ts-expect-error the installed declaration retains canonical operation names
+    runManagementCliOperation('not_an_operation', {}, { client });
+    void supported; void result;
+  `,
+  );
+  execFileSync(
+    process.execPath,
+    [
+      path.join(root, "packages/ssh-manager-runtime/node_modules/typescript/lib/tsc.js"),
+      "--noEmit",
+      "--strict",
+      "--skipLibCheck",
+      "--module",
+      "NodeNext",
+      "--moduleResolution",
+      "NodeNext",
+      "--target",
+      "ES2022",
+      typeFixture,
+    ],
+    { cwd: consumer, stdio: "pipe", timeout: 30000 },
+  );
   console.log(
-    "Packages: three tarball inventories, entrypoints, metadata and offline consumer imports passed; nothing published or connected.",
+    "Packages: three tarball inventories, entrypoints, metadata, offline consumer imports and CLI declarations passed; nothing published or connected.",
   );
 } catch (error) {
   // Keep machine-local paths and tool output out of the public evidence line.

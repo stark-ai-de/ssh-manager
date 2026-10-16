@@ -17,6 +17,10 @@ Use the smallest relevant focused check while developing, then run **`pnpm valid
 
 The package check verifies all three packages contain READMEs/licenses, advertised entrypoints and concrete internal dependency versions, excludes source/tests/private files, then installs tarballs into an isolated consumer using the source workspace's resolved pnpm store and `--offline --frozen-lockfile --ignore-scripts`, and imports the public APIs. Reusing that store also supports temporary consumers on a different Windows drive or outside workspace-local store configuration. The consumer lockfile reuses the reviewed registry graph and replaces only workspace roots with the exact local tarballs and their integrity hashes; it does not re-resolve third-party versions or depend on registry metadata being cached. Only this disposable, derived consumer uses pnpm's `--trust-lockfile` to avoid a second network-dependent policy lookup; the normal source install still enforces the repository's supply-chain policies. This is not a recommendation to bypass policy verification in a real consumer project. It does not start an SSH daemon. It is inspired by the source-to-consumer proof pattern in [Agent Skills](project-readiness.md#patterns-adapted-from-agent-skills), adapted to npm packages rather than skill installations.
 
+## MCP duration qualification
+
+`pnpm test:mcp:duration` exercises the unchanged published SDK over real official stdio for at least 602 seconds in both supported protocol generations. It reuses eight request IDs across many completed batches, checks the full canonical tool list and verifies bounded current ownership. Run it for changes to the [MCP lifecycle contract](mcp-lifecycle.md); it is separate from the ordinary under-one-minute test runner. It uses local canonical fixture data, not native Mechas authority or live SSH targets.
+
 ## Optional native qualification
 
 Prerequisites: existing `sshd`, `ssh-agent`, `ssh-add` and `tmux`. On Linux/macOS:

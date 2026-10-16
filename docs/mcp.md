@@ -49,3 +49,7 @@ The operation catalog is maintained in [catalog.ts](../packages/ssh-manager-runt
 Closing the MCP client detaches its authenticated readers/writer and does not stop the daemon. A later client can attach to a still-running daemon-owned terminal, but must obtain its own authenticated writer lease. Losing SSH connectivity or restarting the daemon can lose a plain PTY. Jobs are never automatically replayed. Vault lock keeps established authenticated sessions alive while preventing new vault-based authentication.
 
 If startup fails, build first, check the Node version and state-directory ownership, then use [troubleshooting](troubleshooting.md). Never work around a failure by exposing the loopback API on a public interface.
+
+## Trusted embedding
+
+The configurable [public client/stdio integration](client-integration.md) preserves this catalog and the official SDK transport. Reusable bounded admission operates on the unchanged published SDK 2.3.1 with lifecycle ownership in the SSH Manager. The [upstream completion-hook proposal is optional](mcp-lifecycle.md#optional-upstream-proposal); its merge is not a prerequisite. Standalone invocation uses the same bounded owner.

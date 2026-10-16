@@ -22,9 +22,15 @@ export type SessionSnapshot = {
   output: OutputPage;
   recordingPaused: boolean;
 };
+export interface SessionReaderLease {
+  readonly snapshot: Promise<SessionSnapshot>;
+  /** Idempotent exact-reader cleanup; cannot detach a replacement attachment. */
+  detach(): void;
+}
 export interface SessionAPI {
   create(actor: Actor, targetId: string, options?: SessionOptions): Promise<SessionInfo>;
   attach(actor: Actor, sessionId: string, cursor?: number): Promise<SessionSnapshot>;
+  attachWithCleanup(actor: Actor, sessionId: string, cursor?: number): SessionReaderLease;
   read(
     actor: Actor,
     sessionId: string,

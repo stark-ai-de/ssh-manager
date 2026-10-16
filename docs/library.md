@@ -105,3 +105,7 @@ The runtime exposes authenticated `/v1/` JSON operations and an authenticated `/
 Small file calls transfer base64 ranges (up to 64 KiB); `client.download` and `client.upload` support streams, cancellation and progress callbacks. An interrupted upload may leave a partial remote file. `/v1/events` is a WebSocket endpoint: authenticate in the first message, not a URL query parameter. The current runtime OpenAPI document describes these envelopes and routes.
 
 Handle structured `ManagementError` / `APIError` codes. A timeout is not evidence that a command never ran. Output cursors are bounded: a `gap` requires resynchronizing a terminal with an attach snapshot. Avoid logging remote command/output content or identifying profile details without an explicit application policy.
+
+## Verified client embedding
+
+Application-specific lifecycle owners use the additive [management-client integration](client-integration.md). Native authority, admission tickets and persisted receipts remain responsibilities of the host.
