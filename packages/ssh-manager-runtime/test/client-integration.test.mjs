@@ -670,7 +670,7 @@ test("joining JSON completion retains a decoded result and a failed detach until
   callTail.resolve();
   assert.deepEqual(await call, []);
   let closeDone = false;
-  const closing = client.close();
+  const closing = client.close({ timeout: 30000 });
   const failed = assert.rejects(closing);
   void closing.catch(() => {
     closeDone = true;
@@ -861,4 +861,37 @@ test("fresh HTTP sockets survive post-response proof then physically close witho
   }
   assert.equal(peers.length, 2);
   assert.notEqual(peers[0], peers[1]);
+});
+
+test("detach keeps its two-second default and accepts an explicit native-verification deadline", async (t) => {
+  const deadlines = [];
+  t.mock.method(AbortSignal, "timeout", (milliseconds) => {
+    deadlines.push(milliseconds);
+    return new AbortController().signal;
+  });
+  for (const timeout of [undefined, 30000]) {
+    const transport = {
+      start(request) {
+        return {
+          result: Promise.resolve({
+            ok: true,
+            body: request.path === "/v1/clients" ? registration : { data: { detached: true } },
+          }),
+          settled: Promise.resolve(),
+          sent: true,
+          responseComplete: true,
+          cancel() {},
+        };
+      },
+    };
+    const client = new ManagementClient("http://127.0.0.1:1/", "b".repeat(43), {
+      transport,
+      automaticHeartbeat: false,
+      strictCleanup: true,
+    });
+    await client.connect();
+    deadlines.length = 0;
+    await client.close(timeout === undefined ? {} : { timeout });
+    assert.deepEqual(deadlines, [timeout ?? 2000]);
+  }
 });

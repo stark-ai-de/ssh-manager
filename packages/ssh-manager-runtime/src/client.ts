@@ -602,7 +602,11 @@ export class ManagementClient {
     return stream;
   }
   close(
-    options: { authority?: ClientExchangeAuthority; capacityClass?: "ordinary" | "control" } = {},
+    options: {
+      authority?: ClientExchangeAuthority;
+      capacityClass?: "ordinary" | "control";
+      timeout?: number;
+    } = {},
   ): Promise<void> {
     if (this.#closing) return this.#closing;
     this.#closed = true;
@@ -631,7 +635,7 @@ export class ManagementClient {
             "/v1/clients/detach",
             {},
             {
-              timeout: 2000,
+              timeout: options.timeout ?? 2000,
               closing: true,
               authority: this.#abandonedRegistrationAuthority ?? options.authority,
               capacityClass: this.#registrationAbandoned
