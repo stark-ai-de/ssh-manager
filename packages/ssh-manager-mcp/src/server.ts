@@ -53,6 +53,12 @@ export function createMcpServer(client: ManagementClient, options: McpIntegratio
       async (args: any, context: ServerContext) => {
         try {
           await options.beforeCall?.(name as Operation, context, args);
+          const signal = context.mcpReq.signal;
+          if (signal.aborted) throw new APIError("CANCELLED_OR_TIMEOUT", "MCP request cancelled.");
+          await client.connect({ signal, joinPhysical: true });
+          if (signal.aborted) throw new APIError("CANCELLED_OR_TIMEOUT", "MCP request cancelled.");
+          if (client.registration?.kind !== "agent")
+            throw new APIError("FORBIDDEN", "MCP requires a registered agent client.");
           const structuredContent = {
             data: options.invoke
               ? await options.invoke(name as Operation, context, args, client)

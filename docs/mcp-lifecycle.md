@@ -16,6 +16,10 @@ If the proposal is merged substantially in this form and appears in a reviewed S
 
 [stdio-transport.ts](../packages/ssh-manager-mcp/src/stdio-transport.ts) keeps official `StdioServerTransport` framing and input decoding. A Node Writable adapter joins the actual output callback, including backpressure. Direct sends are serialized so each promise owns its own callback. A public Node `finished` observer is attached before any write and joins actual asynchronous stream destruction after failure, including stdout configurations that do not emit a close event; a destroy request, deferred error or elapsed turn cannot replace that completion. A failed stream without observable completion keeps shutdown pending. Healthy process stdout is never ended or destroyed by normal close.
 
+The shared public server boundary physically joins registration and checks current agent identity before either default or custom invocation, including package-root embeddings that do not use stdio. Stdio's existing handler observer schedules the full `tools/call` handler within the active/waiting limits; queued registrations cannot escape that budget. Canonical argument validation still precedes `beforeCall`, registration and invocation.
+
+The canonical transport owns one stable finalization promise for explicit close and SDK-observed EOF. The outer owner joins that finalizer even when the SDK has already marked its connection closed and skips another transport close. Input inspection listeners and output `finished`/error observers are removed after physical output completion. Transport failures retain the SDK's reporting semantics; unresolved client cleanup still rejects only after every owned tail has settled.
+
 ## Completion proof for SDK 2.3.1
 
 The official stdio entry has no public completion callback. The provider therefore submits one new entry at a time and joins factory construction, actual output and discovery-handler work before an event-loop checkpoint. Its bounded queue keeps the SDK's internal entry pump from acquiring an unobserved backlog. Ordinary tool handlers may continue concurrently up to their configured limit.

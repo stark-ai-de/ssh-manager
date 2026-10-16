@@ -14,6 +14,7 @@ export function createManagementStdioTransport(
 ): Transport {
   let writing: Promise<void> = Promise.resolve();
   let sends: Promise<void> = Promise.resolve();
+  let closing: Promise<void> | undefined;
   const sink = new Writable({
     write(chunk, encoding, callback) {
       writing = new Promise<void>((resolve, reject) => {
@@ -92,7 +93,11 @@ export function createManagementStdioTransport(
         if (!inputFailed) transport.onmessage?.(message);
       };
       wire.onerror = (error) => transport.onerror?.(error);
-      wire.onclose = () => transport.onclose?.();
+      wire.onclose = () => {
+        // Natural EOF closes the SDK wire without calling our public close.
+        void transport.close().catch(() => {});
+        transport.onclose?.();
+      };
       input.on("data", inspectInput);
       input.on("end", inspectEnd);
       await wire.start();
@@ -113,19 +118,31 @@ export function createManagementStdioTransport(
       sends = done.catch(() => {});
       return done;
     },
-    close: async () => {
-      try {
-        input.off("data", inspectInput);
-        input.off("end", inspectEnd);
-        pendingInput = Buffer.alloc(0);
-        await wire.close();
-        await sends;
-        await writing;
-      } finally {
-        await settleOutput();
-        unobserveOutput?.();
-        output.off("error", outputError);
-      }
+    close: () => {
+      if (closing) return closing;
+      input.off("data", inspectInput);
+      input.off("end", inspectEnd);
+      pendingInput = Buffer.alloc(0);
+      // Publish the single owner before wire.close synchronously fires onclose,
+      // while still stopping SDK input synchronously on explicit close.
+      let resolve!: () => void;
+      let reject!: (error: unknown) => void;
+      closing = new Promise<void>((yes, no) => {
+        resolve = yes;
+        reject = no;
+      });
+      void (async () => {
+        try {
+          await wire.close();
+          await sends;
+          await writing;
+        } finally {
+          await settleOutput();
+          unobserveOutput?.();
+          output.off("error", outputError);
+        }
+      })().then(resolve, reject);
+      return closing;
     },
   };
   return transport;

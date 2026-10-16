@@ -187,6 +187,114 @@ test("additional cancelled connect waiter never abandons the owner's registratio
   }
 });
 
+test("initial joined connect rejects cancellation or close after the registration result", async (t) => {
+  for (const retainSentRegistration of [false, true]) {
+    for (const action of ["abort", "close"]) {
+      await t.test(`${action}, retained=${retainSentRegistration}`, async (t) => {
+        const physical = deferred(),
+          detach = deferred();
+        const original = authority(),
+          requests = [];
+        const abort = new AbortController();
+        const client = clientFixture({
+          retainSentRegistration,
+          strictCleanup: true,
+          transport: {
+            start(request) {
+              requests.push(request);
+              return request.path === "/v1/clients"
+                ? exchange(reply(registration), physical.promise)
+                : exchange(reply({ detached: true }), detach.promise);
+            },
+          },
+        }).client;
+        t.after(async () => {
+          physical.resolve();
+          detach.resolve();
+          await client.close();
+        });
+        let done = false;
+        const outcome = client
+          .connect({ authority: original, signal: abort.signal, joinPhysical: true })
+          .then(
+            (value) => ({ value }),
+            (error) => ({ error }),
+          )
+          .then((value) => {
+            done = true;
+            return value;
+          });
+        await tick();
+        assert.equal(client.registration.kind, "agent");
+        assert.equal(done, false);
+        if (action === "abort") abort.abort();
+        else void client.close();
+        await tick();
+        assert.equal(done, false);
+        physical.resolve();
+        await tick();
+        if (action === "close" || retainSentRegistration) {
+          assert.equal(done, false, "joined connect must also join owned detach");
+          assert.equal(requests.filter((r) => r.path === "/v1/clients/detach").length, 1);
+        }
+        detach.resolve();
+        const result = await outcome;
+        assert.ok(
+          result.error,
+          "cancelled/closed registration must not return a successful client",
+        );
+        assert.match(result.error.code, /^(NOT_CONNECTED|CANCELLED_OR_TIMEOUT)$/);
+        if (action === "abort" && retainSentRegistration) {
+          const cleanup = requests.at(-1);
+          assert.equal(cleanup.capacityClass, "ordinary");
+          cleanup.authority.assertCurrent();
+          cleanup.authority.invalidate();
+          assert.equal(original.revocations, 1, "detach retains the original authority");
+        }
+        await client.close();
+        assert.equal(requests.filter((r) => r.path === "/v1/clients/detach").length, 1);
+      });
+    }
+  }
+});
+
+test("secondary joined waiters cancelled after result preserve the initial registration owner", async (t) => {
+  for (const startAfterResult of [false, true]) {
+    const physical = deferred(),
+      requests = [];
+    const client = clientFixture({
+      retainSentRegistration: true,
+      transport: {
+        start(request) {
+          requests.push(request.path);
+          return request.path === "/v1/clients"
+            ? exchange(reply(registration), physical.promise)
+            : exchange(reply({ detached: true }));
+        },
+      },
+    }).client;
+    t.after(async () => {
+      physical.resolve();
+      await client.close();
+    });
+    const owner = client.connect({ joinPhysical: true });
+    if (startAfterResult) await tick();
+    const abort = new AbortController();
+    const waiter = client.connect({ signal: abort.signal, joinPhysical: true });
+    const rejected = assert.rejects(waiter);
+    await tick();
+    abort.abort();
+    await tick();
+    assert.deepEqual(requests, ["/v1/clients"]);
+    physical.resolve();
+    await rejected;
+    assert.equal(await owner, client);
+    assert.equal(client.registration.kind, "agent");
+    assert.deepEqual(requests, ["/v1/clients"]);
+    await client.close();
+  }
+});
+
 for (const strictCleanup of [false, true]) {
   test(`close joins every physical tail before reporting cleanup failure (strict=${strictCleanup})`, async () => {
     const failed = deferred(),

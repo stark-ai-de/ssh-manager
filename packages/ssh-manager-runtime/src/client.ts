@@ -378,7 +378,10 @@ export class ManagementClient {
           this.#connecting = undefined;
       });
     }
-    const connected = this.#connecting!.then(() => {
+    const registrationExchange = this.#registrationExchange;
+    const connected = this.#connecting!.then(async () => {
+      // Ownership and cancellation remain live until the requested physical join.
+      if (options.joinPhysical) await registrationExchange?.settled;
       if (this.#closed || this.#invalid || signal?.aborted)
         throw new APIError("NOT_CONNECTED", "This API client is no longer attached.");
       return this;
@@ -390,7 +393,7 @@ export class ManagementClient {
         if (options.joinPhysical && this.#closed) await this.close();
         throw error;
       } finally {
-        if (options.joinPhysical) await this.#registrationExchange?.settled;
+        if (options.joinPhysical) await registrationExchange?.settled;
       }
     };
     if (!signal || (ownsRegistration && !this.options.retainSentRegistration))

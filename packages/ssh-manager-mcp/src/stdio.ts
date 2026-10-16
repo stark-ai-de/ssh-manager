@@ -1,5 +1,10 @@
 import * as sdk from "@modelcontextprotocol/server/stdio";
-import type { Transport, JSONRPCMessage, MessageExtraInfo } from "@modelcontextprotocol/server";
+import type {
+  Transport,
+  JSONRPCMessage,
+  MessageExtraInfo,
+  ServerContext,
+} from "@modelcontextprotocol/server";
 import { APIError, ManagementClient, clientJsonBytes } from "@stark-ai/ssh-manager-runtime/client";
 import type { McpIntegrationOptions } from "./server.js";
 import { createMcpServer } from "./server.js";
@@ -115,25 +120,15 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
         });
     }
   };
-  const invoke: NonNullable<McpIntegrationOptions["invoke"]> = (
-    operation,
-    context,
-    args,
-    client,
-  ) => {
-    const execute = async () => {
-      if (closed || context.mcpReq.signal.aborted)
-        throw new APIError("NOT_CONNECTED", "MCP owner is closed.");
-      await client.connect({ signal: context.mcpReq.signal, joinPhysical: true });
-      if (context.mcpReq.signal.aborted)
-        throw new APIError("CANCELLED_OR_TIMEOUT", "MCP request cancelled.");
-      if (closed || client.registration?.kind !== "agent")
-        throw new APIError("FORBIDDEN", "MCP requires a registered agent client.");
-      if (options.invoke) return options.invoke(operation, context, args, client);
-      return client.call(operation, args, { signal: context.mcpReq.signal, joinPhysical: true });
-    };
+  const runCall = (context: ServerContext, execute: () => unknown | Promise<unknown>) => {
     const run = () => {
-      const tail = execute().finally(() => callTails.delete(tail));
+      const tail = Promise.resolve()
+        .then(() => {
+          if (closed || context.mcpReq.signal.aborted)
+            throw new APIError("NOT_CONNECTED", "MCP owner is closed.");
+          return execute();
+        })
+        .finally(() => callTails.delete(tail));
       callTails.add(tail);
       return tail;
     };
@@ -181,7 +176,7 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
       if ("id" in record.message && "method" in record.message) requests.delete(record.message.id);
     });
   };
-  const trackRequest: NonNullable<McpIntegrationOptions["trackRequest"]> = (context, run) => {
+  const trackRequest = <T>(context: ServerContext, run: () => T | Promise<T>): Promise<T> => {
     const record = requests.get(context.mcpReq.id);
     if (!record) {
       deny();
@@ -189,7 +184,13 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
     }
     record.handlers++;
     const done = Promise.resolve()
-      .then(run)
+      // The shared server owns validation and agent admission. Schedule its
+      // whole tool handler so registration still consumes active-call capacity.
+      .then(() =>
+        "method" in record.message && record.message.method === "tools/call"
+          ? (runCall(context, run) as Promise<T>)
+          : run(),
+      )
       .finally(() => {
         record.handlers--;
         handlerTails.delete(done);
@@ -228,6 +229,12 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
     clients.set(client, done);
     return done;
   };
+  let wireClosing: Promise<void> | undefined;
+  // Preserve the SDK's transport-error reporting semantics, including on EOF.
+  const closeWire = () =>
+    (wireClosing ??= Promise.resolve()
+      .then(() => wire.close())
+      .catch(report));
   const transport: Transport = {
     start: () => wire.start(),
     send: (message, sendOptions) => {
@@ -275,7 +282,7 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
       });
       return done;
     },
-    close: () => wire.close(),
+    close: closeWire,
   };
   // SDK serveStdio's private pump never has a backlog: one entry at a time,
   // with factory and actual output barriers. Tool handlers can keep running.
@@ -393,8 +400,9 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
             beforeCall: async (operation, context, args) => {
               if (closed) throw new APIError("NOT_CONNECTED", "MCP owner is closed.");
               await options.beforeCall?.(operation, context, args);
+              if (closed) throw new APIError("NOT_CONNECTED", "MCP owner is closed.");
             },
-            invoke,
+            invoke: options.invoke,
             onCleanupError: report,
           });
           server.server.onclose = () => {
@@ -423,6 +431,8 @@ export function serveManagementStdio(options: ManagementStdioOptions): Managemen
     }
     closing = (async () => {
       await (await handleReady).close();
+      // SDK close short-circuits after EOF; we still own the transport finalizer.
+      await closeWire();
       await pumping;
       await Promise.allSettled([...handlerTails, ...callTails, ...factories]);
       await writeTail;
