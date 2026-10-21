@@ -289,14 +289,18 @@ export class ConnectionPool extends EventEmitter {
               error ? reject(error) : resolve();
             };
             signal.addEventListener("abort", cancel, { once: true });
-            client.on("error", () =>
+            client.on("error", (error: Error & { level?: string }) =>
               finish(
                 verificationError instanceof ManagementError
                   ? verificationError
-                  : new ManagementError(
-                      "AUTHENTICATION_FAILED",
-                      "SSH authentication or handshake failed.",
-                    ),
+                  : error.level === "client-socket" || error.level === "client-dns"
+                    ? new ManagementError("CONNECTION_FAILED", "SSH target could not be reached.")
+                    : error.level === "client-timeout"
+                      ? new ManagementError("TIMEOUT", "SSH handshake timed out.")
+                      : new ManagementError(
+                          "AUTHENTICATION_FAILED",
+                          "SSH authentication or handshake failed.",
+                        ),
               ),
             );
             client.once("close", () =>

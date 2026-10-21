@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { SSHManager } from "../dist/index.js";
@@ -147,4 +148,59 @@ test("Windows shells receive exact job commands and interactive launchers", asyn
   await ctx.manager.sessions.create(agent, ctx.profile.id);
   assert.equal(ctx.fixture.commands.at(-1), "cmd.exe /d");
   assert.equal(ctx.fixture.counts.shell, 0);
+});
+
+test("unreachable and stalled targets stay distinct from rejected logins", async (t) => {
+  const ctx = await managedFixture(t);
+  const { manager, fixture } = ctx;
+  const closedPort = await new Promise((resolve) => {
+    const probe = net.createServer().listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+  const stalled = new Set();
+  const silent = net.createServer((socket) => {
+    stalled.add(socket);
+    socket.on("error", () => {});
+  });
+  await new Promise((resolve) => silent.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    for (const socket of stalled) socket.destroy();
+    silent.close();
+  });
+  const wrong = manager.addCredential(
+    operator,
+    { kind: "vault", name: "wrong", secretKind: "password" },
+    { value: "not-the-password" },
+  );
+  const target = (name, port, credentialId = ctx.credential.id) => {
+    const profile = manager.createProfile(operator, {
+      name,
+      host: "127.0.0.1",
+      port,
+      username: "fixture-user",
+      credentialId,
+    });
+    manager.confirmHost(
+      operator,
+      profile.id,
+      profile.revision,
+      fixture.publicKey.toString("base64"),
+      fixture.fingerprint,
+    );
+    manager.setGrants(operator, profile.id, profile.revision, allCapabilities);
+    return profile.id;
+  };
+  await assert.rejects(manager.openConnection(agent, target("refused", closedPort)), {
+    code: "CONNECTION_FAILED",
+  });
+  await assert.rejects(manager.openConnection(agent, target("stalled", silent.address().port)), {
+    code: "TIMEOUT",
+  });
+  const authBefore = fixture.counts.auth;
+  await assert.rejects(manager.openConnection(agent, target("rejected", fixture.port, wrong.id)), {
+    code: "AUTHENTICATION_FAILED",
+  });
+  assert.ok(fixture.counts.auth > authBefore);
 });
