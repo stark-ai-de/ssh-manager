@@ -93,7 +93,9 @@ export async function sshFixture(options = {}) {
     shells = new Set(),
     forwards = new Set(),
     tmux = new Map(),
-    counts = { auth: 0, exec: 0, shell: 0 };
+    counts = { auth: 0, exec: 0, shell: 0 },
+    keyboardAnswers = [],
+    commands = [];
   const close = onceAsync(() =>
     cleanupAsync([
       ...[...connections].flatMap((client) => [
@@ -128,6 +130,24 @@ export async function sshFixture(options = {}) {
       client.once("close", () => connections.delete(client));
       client.on("authentication", (context) => {
         counts.auth++;
+        // `keyboard` lists prompt rounds; every answer must be the password, as with PAM.
+        if (options.keyboard) {
+          if (context.method !== "keyboard-interactive")
+            return context.reject(["keyboard-interactive"]);
+          const rounds = [...options.keyboard];
+          const next = () => {
+            const prompts = rounds.shift();
+            if (!prompts) return context.accept();
+            context.prompt(prompts, (answers) => {
+              if (!Array.isArray(answers)) return;
+              keyboardAnswers.push(answers);
+              answers.length === prompts.length && answers.every((a) => a === password)
+                ? next()
+                : context.reject();
+            });
+          };
+          return next();
+        }
         const accept = () =>
           context.method === "password" && context.password === password
             ? context.accept()
@@ -155,6 +175,7 @@ export async function sshFixture(options = {}) {
           });
           session.on("exec", (accept, _reject, info) => {
             counts.exec++;
+            commands.push(info.command);
             const channel = accept();
             channel.on("error", () => {});
             if (options.tmux && info.command.startsWith("tmux ")) {
@@ -431,6 +452,8 @@ export async function sshFixture(options = {}) {
       shells,
       forwards,
       counts,
+      keyboardAnswers,
+      commands,
       tmux,
       close,
     };

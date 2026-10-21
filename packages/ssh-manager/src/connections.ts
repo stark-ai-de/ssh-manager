@@ -308,12 +308,23 @@ export class ConnectionPool extends EventEmitter {
               ),
             );
             client.once("ready", () => finish());
+            const password = authentication.password;
+            let answered = false;
+            // PAM-backed servers often offer passwords only as one hidden keyboard-interactive prompt.
+            // Answer that prompt once; decline every other prompt so no secret is offered twice.
+            if (password !== undefined)
+              client.on("keyboard-interactive", (_name, _instructions, _lang, prompts, reply) => {
+                const single = !answered && prompts.length === 1 && !prompts[0]!.echo;
+                answered ||= single;
+                reply(single ? [password] : []);
+              });
             client.connect({
               host: profile.host,
               port: profile.port,
               username: profile.username,
               ...authentication,
               ...(socket ? { sock: socket } : {}),
+              tryKeyboard: password !== undefined,
               readyTimeout: this.limits.authTimeout,
               keepaliveInterval: 15000,
               keepaliveCountMax: 3,

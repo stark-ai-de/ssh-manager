@@ -31,7 +31,9 @@ Set narrow file roots explicitly before granting file access. File-root restrict
 
 Profile IDs are distinct from names. Updates carry `expectedRevision`; stale edits fail instead of silently overwriting state. Endpoint/credential/route and other sensitive changes invalidate affected grants/connections. Reread the current profile and review it again before regranting.
 
-SSH config import is deliberately partial: preview supported aliases/HostName/User/Port, review warnings, then apply. It never executes `ProxyCommand`, expands `Include`, reads private keys, or imports trust/grants. `IdentityFile` and `ProxyJump` need explicit credential/target references afterwards.
+SSH config import is deliberately partial: preview supported aliases/HostName/User/Port, review warnings, then apply. It never executes `ProxyCommand`, expands `Include`, reads private keys, or imports trust/grants. `IdentityFile` and `ProxyJump` need explicit credential/target references afterwards. `Match` blocks are not evaluated: their directives are reported as warnings and never extend the preceding `Host`. Per-profile warnings cite that profile's `Host` line. At most 256 warnings are returned; when more exist, the last entry is `warnings-truncated`.
+
+The preview parses only the text it receives. It is not an OpenSSH resolver and does not reproduce `ssh -G` precedence, `Include`, `Match` or default files. An embedding application that needs the effective configuration of a local OpenSSH client owns that resolution and passes explicit profile fields to the operator API.
 
 ## Credentials
 
@@ -40,6 +42,8 @@ SSH config import is deliberately partial: preview supported aliases/HostName/Us
 | `agent`    | Name and socket reference                                 | A reachable agent with an appropriate loaded key                     |
 | `key-file` | Name, absolute key path and optional vault `passphraseId` | The file must remain readable; an encrypted key needs its passphrase |
 | `vault`    | Reference metadata; secret bytes encrypted locally        | Initialized/unlocked vault for new authentication                    |
+
+A vault password is offered by SSH `password` authentication and, for servers that allow only `keyboard-interactive` (for example PAM), as the answer to exactly one hidden single-prompt round. Visible prompts, multi-prompt rounds and any later round receive no answer, so one-time codes and other challenges fail with `AUTHENTICATION_FAILED` instead of receiving the password.
 
 The vault supports password, private-key and passphrase records. `vault-init`, `vault-unlock` and `vault-rotate` prompt interactively without echoing passwords. `vault-lock` clears vault decryption availability but **does not terminate authenticated sessions**.
 
