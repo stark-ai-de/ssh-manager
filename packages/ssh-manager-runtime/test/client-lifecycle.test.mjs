@@ -1,13 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import http from "node:http";
 import { once } from "node:events";
 import WebSocket from "ws";
-import { createRuntime } from "../dist/server.js";
 import { ManagementClient } from "../dist/client.js";
+import { runtimeFixture } from "./fixture.mjs";
 import {
   sshFixture,
   allCapabilities,
@@ -21,26 +18,13 @@ const ttl = 2000;
 async function liveSession(t) {
   const fixture = await sshFixture();
   t.after(() => fixture.close());
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ssh-lifecycle-test-"));
-  const runtime = await createRuntime({
-    stateDirectory: directory,
-    knownHosts: [],
-    clientTtlMs: ttl,
-    limits: { authTimeout: 1500, channelTimeout: 1500 },
-  });
-  const human = await new ManagementClient(runtime.url, runtime.operatorToken).connect();
-  const agent = await new ManagementClient(runtime.url, runtime.agentToken).connect();
-  const keepAlive = setInterval(() => {
+  let keepAlive;
+  t.after(() => clearInterval(keepAlive));
+  const { runtime, human, agent } = await runtimeFixture(t, { clientTtlMs: ttl });
+  keepAlive = setInterval(() => {
     void human.heartbeat().catch(() => {});
     void agent.heartbeat().catch(() => {});
   }, 250);
-  t.after(async () => {
-    clearInterval(keepAlive);
-    await human.close();
-    await agent.close();
-    await runtime.close();
-    fs.rmSync(directory, { recursive: true, force: true });
-  });
   await human.call("ssh_vault_initialize", { password: vaultPassword });
   const credential = await human.call("ssh_credential_add", {
     reference: { name: "fixture", kind: "vault", secretKind: "password" },

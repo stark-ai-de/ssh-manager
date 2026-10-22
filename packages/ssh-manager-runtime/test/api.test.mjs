@@ -1,13 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import WebSocket from "ws";
 import { once } from "node:events";
 import http from "node:http";
-import { createRuntime } from "../dist/server.js";
-import { ManagementClient } from "../dist/client.js";
+import { runtimeFixture } from "./fixture.mjs";
 import { catalog } from "../dist/catalog.js";
 import {
   sshFixture,
@@ -18,25 +14,8 @@ import {
   delay,
 } from "../../ssh-manager/test/fixture.mjs";
 
-async function setup(t) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "ssh-api-test-"));
-  const runtime = await createRuntime({
-    stateDirectory: directory,
-    knownHosts: [],
-    limits: { authTimeout: 1500, channelTimeout: 1500 },
-  });
-  const human = await new ManagementClient(runtime.url, runtime.operatorToken).connect();
-  const agent = await new ManagementClient(runtime.url, runtime.agentToken).connect();
-  t.after(async () => {
-    await human.close();
-    await agent.close();
-    await runtime.close();
-    fs.rmSync(directory, { recursive: true, force: true });
-  });
-  return { directory, runtime, human, agent };
-}
 test("operator API stores and restores valid large vault backups while denying agents before body parsing", async (t) => {
-  const { runtime, human, agent } = await setup(t);
+  const { runtime, human, agent } = await runtimeFixture(t);
   await human.call("ssh_vault_initialize", { password: vaultPassword });
   const reference = await human.call("ssh_credential_add", {
     reference: { kind: "vault", name: "large backup fixture", secretKind: "passphrase" },
@@ -79,7 +58,7 @@ test("operator API stores and restores valid large vault backups while denying a
   );
 });
 test("loopback bearer roles, Host/Origin checks and strict inputs prevent API privilege escalation", async (t) => {
-  const { runtime, human, agent } = await setup(t);
+  const { runtime, human, agent } = await runtimeFixture(t);
   const unauthenticated = await fetch(runtime.url + "/v1/ssh_hosts_list", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -160,7 +139,7 @@ test("loopback bearer roles, Host/Origin checks and strict inputs prevent API pr
 test("HTTP streaming and WebSocket use the same target permissions and authenticated writer", async (t) => {
   const fixture = await sshFixture();
   t.after(() => fixture.close());
-  const { runtime, human, agent } = await setup(t);
+  const { runtime, human, agent } = await runtimeFixture(t);
   await human.call("ssh_vault_initialize", { password: vaultPassword });
   const credential = await human.call("ssh_credential_add", {
     reference: { name: "fixture", kind: "vault", secretKind: "password" },
