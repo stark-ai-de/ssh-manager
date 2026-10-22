@@ -4,7 +4,7 @@ import { pipeline } from "node:stream/promises";
 import type { SFTPWrapper, Stats, FileEntryWithStats } from "ssh2";
 import { fault, ManagementError, type Actor, type Capability, type Profile } from "./contracts.js";
 import { ConnectionPool, type Lease } from "./connections.js";
-import type { TransferOptions } from "./public-api.js";
+import type { FileScope, TransferOptions } from "./public-api.js";
 import { aborted, request } from "./util.js";
 
 export class Files {
@@ -77,12 +77,40 @@ export class Files {
       ctx.close();
     }
   }
+  private scopedRoots(scope?: FileScope): readonly string[] | undefined {
+    if (scope === undefined) return undefined;
+    if (
+      !scope ||
+      typeof scope !== "object" ||
+      Array.isArray(scope) ||
+      Reflect.ownKeys(scope).length !== 1 ||
+      !Object.hasOwn(scope, "roots")
+    )
+      fault("INVALID_ARGUMENT", "Invalid file scope.");
+    const roots = scope.roots;
+    if (!Array.isArray(roots) || roots.length > 16)
+      fault("INVALID_ARGUMENT", "Invalid file scope.");
+    for (const root of roots) {
+      if (
+        typeof root !== "string" ||
+        !root.startsWith("/") ||
+        root.length > 1024 ||
+        (root !== "/" && root.endsWith("/")) ||
+        /[\\\x00-\x1f\x7f]/.test(root) ||
+        path.posix.normalize(root) !== root
+      )
+        fault("INVALID_ARGUMENT", "Use canonical absolute file scope roots.");
+    }
+    // Capture before the first await so mutation of embedder-owned arrays cannot widen a call.
+    return Object.freeze([...roots]);
+  }
   private async checked(
     sftp: SFTPWrapper,
     profile: Profile,
     remote: string,
     create: boolean,
     signal?: AbortSignal,
+    scopedRoots?: readonly string[],
   ) {
     if (
       typeof remote !== "string" ||
@@ -93,12 +121,15 @@ export class Files {
     )
       fault("PATH_DENIED", "Use an absolute SFTP path without traversal or control characters.");
     const canonical = path.posix.normalize(remote);
-    const within = (actual: string) =>
-      profile.fileRoots.some(
+    const inside = (actual: string, roots: readonly string[]) =>
+      roots.some(
         (root) =>
           actual === path.posix.normalize(root) ||
           actual.startsWith(path.posix.normalize(root).replace(/\/$/, "") + "/"),
       );
+    const within = (actual: string) =>
+      inside(actual, profile.fileRoots) &&
+      (scopedRoots === undefined || inside(actual, scopedRoots));
     if (!within(canonical))
       fault("PATH_DENIED", "Path is outside the target's permitted file roots.");
     let actual: string;
@@ -114,6 +145,19 @@ export class Files {
         (error instanceof ManagementError && ["CANCELLED", "TIMEOUT"].includes(error.code))
       )
         throw error;
+      // A failed REALPATH may be an existing dangling symlink, not a new file.
+      // Only a definite missing leaf may use the checked-parent creation path.
+      const missing = await request<boolean>(
+        (cb) =>
+          sftp.lstat(canonical, (error) => {
+            if (error && "code" in error && error.code === 2) cb(null, true);
+            else if (error) cb(error);
+            else cb(null, false);
+          }),
+        this.pool.limits.channelTimeout,
+        signal,
+      );
+      if (!missing) fault("PATH_DENIED", "Cannot create through an unresolved existing path.");
       const parent = await request<string>(
         (cb) => sftp.realpath(path.posix.dirname(canonical), cb),
         this.pool.limits.channelTimeout,
@@ -137,10 +181,17 @@ export class Files {
       symlink: stats.isSymbolicLink(),
     };
   }
-  async list(actor: Actor, targetId: string, remote: string, signal?: AbortSignal) {
+  async list(
+    actor: Actor,
+    targetId: string,
+    remote: string,
+    signal?: AbortSignal,
+    scope?: FileScope,
+  ) {
+    const roots = this.scopedRoots(scope);
     const ctx = await this.open(actor, targetId, "files.read", signal);
     try {
-      const actual = await this.checked(ctx.sftp, ctx.profile, remote, false, signal);
+      const actual = await this.checked(ctx.sftp, ctx.profile, remote, false, signal, roots);
       const handle = await request<Buffer>(
         (cb) => ctx.sftp.opendir(actual, cb),
         this.pool.limits.channelTimeout,
@@ -177,10 +228,17 @@ export class Files {
       ctx.close();
     }
   }
-  async stat(actor: Actor, targetId: string, remote: string, signal?: AbortSignal) {
+  async stat(
+    actor: Actor,
+    targetId: string,
+    remote: string,
+    signal?: AbortSignal,
+    scope?: FileScope,
+  ) {
+    const roots = this.scopedRoots(scope);
     const ctx = await this.open(actor, targetId, "files.read", signal);
     try {
-      const actual = await this.checked(ctx.sftp, ctx.profile, remote, false, signal);
+      const actual = await this.checked(ctx.sftp, ctx.profile, remote, false, signal, roots);
       return this.metadata(
         await request<Stats>(
           (cb) => ctx.sftp.stat(actual, cb),
@@ -202,8 +260,10 @@ export class Files {
       mode?: number;
       directory?: boolean;
       signal?: AbortSignal;
+      scope?: FileScope;
     } = {},
   ) {
+    const roots = this.scopedRoots(options.scope);
     const ctx = await this.open(actor, targetId, "files.write", options.signal);
     try {
       const actual = await this.checked(
@@ -212,6 +272,7 @@ export class Files {
         remote,
         operation === "mkdir",
         options.signal,
+        roots,
       );
       const mode = options.mode ?? 0o700;
       if (!Number.isInteger(mode) || mode < 0 || mode > 0o777)
@@ -224,6 +285,7 @@ export class Files {
           options.destination ?? "",
           true,
           options.signal,
+          roots,
         );
       await request<void>(
         (cb) => {
@@ -247,9 +309,17 @@ export class Files {
     remote: string,
     options: TransferOptions & { offset?: number; length?: number } = {},
   ): Promise<Readable> {
+    const roots = this.scopedRoots(options.scope);
     const ctx = await this.open(actor, targetId, "files.read", options.signal);
     try {
-      const actual = await this.checked(ctx.sftp, ctx.profile, remote, false, options.signal);
+      const actual = await this.checked(
+        ctx.sftp,
+        ctx.profile,
+        remote,
+        false,
+        options.signal,
+        roots,
+      );
       const stats = await request<Stats>(
         (cb) => ctx.sftp.stat(actual, cb),
         this.pool.limits.channelTimeout,
@@ -311,10 +381,11 @@ export class Files {
     input: Readable,
     options: TransferOptions & { mode?: number } = {},
   ) {
+    const roots = this.scopedRoots(options.scope);
     const ctx = await this.open(actor, targetId, "files.write", options.signal);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const actual = await this.checked(ctx.sftp, ctx.profile, remote, true, options.signal);
+      const actual = await this.checked(ctx.sftp, ctx.profile, remote, true, options.signal, roots);
       aborted(options.signal);
       const mode = options.mode ?? 0o600;
       if (!Number.isInteger(mode) || mode < 0 || mode > 0o777)
@@ -365,9 +436,10 @@ export class Files {
     offset = 0,
     length = 65536,
     signal?: AbortSignal,
+    scope?: FileScope,
   ) {
     if (length > 65536) fault("LIMIT", "Use streaming download or bounded 64 KiB chunks.");
-    const stream = await this.download(actor, targetId, remote, { offset, length, signal });
+    const stream = await this.download(actor, targetId, remote, { offset, length, signal, scope });
     const chunks: Buffer[] = [];
     for await (const chunk of stream) chunks.push(chunk as Buffer);
     return {
