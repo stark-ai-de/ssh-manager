@@ -56,3 +56,21 @@ Target grants and profile roots are shared by the state owner. A trusted embedde
 `list` and `stat` append scope after the optional signal; `read` appends it after its existing signal. `mutate`, `upload` and `download` accept `scope` in their options. Roots are validated and copied before the first asynchronous operation, so later mutation of the caller's array does not widen an in-flight request. This is an ephemeral restriction, not persisted authority or a workspace model. The embedder must authenticate its callers and supply the scope from trusted policy; passing untrusted user roots does not establish isolation.
 
 SFTP realpath followed by another operation remains subject to remote filesystem replacement races; this API is not an atomic open-by-handle sandbox and does not provide stable remote file identity. It cannot constrain arbitrary shell commands or a malicious remote server. Start-directory discovery still returns only path metadata and grants no file access. No HTTP/MCP endpoint or transport permission is added by this direct library argument.
+
+## Vault KDF runtime compatibility
+
+Vault schema 1 retains Argon2id v1.3 with 65536 KiB memory, three passes, four lanes,
+a 16-byte salt and a 32-byte derived key. Native `node:crypto.argon2` remains the first
+backend. Only `ERR_CRYPTO_ARGON2_NOT_SUPPORTED` selects pinned `hash-wasm` 4.12.0;
+Electron/BoringSSL exposes the Node API but reports this capability failure at execution.
+The WebAssembly backend computes the same Argon2id bytes with the same parameters.
+There is no password retry, weaker KDF, format conversion, new endpoint or authority.
+All other native errors propagate; incorrect passwords still fail authenticated vault opening.
+
+The fallback is local and bundled; it does not fetch code or use another Node process.
+Its calculation runs on the owning JavaScript thread and temporarily uses at least the
+64 MiB Argon2 working memory. Embedders must qualify latency/memory on their actual
+runtime and preserve their existing admission bounds. Owned password/result byte buffers
+are cleared in `finally`; JavaScript strings, library-internal/WASM memory and garbage
+collection do not provide a guarantee of immediate complete memory erasure. The runtime
+remains outside the same-user process-inspection threat boundary described above.

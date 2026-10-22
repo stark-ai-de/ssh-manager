@@ -21,6 +21,8 @@ User-visible changes are recorded here. `Unreleased` is not a published release,
 
 ### Changed
 
+- Vault Argon2id uses pinned `hash-wasm` only when native crypto reports `ERR_CRYPTO_ARGON2_NOT_SUPPORTED` (for example Electron/BoringSSL). Existing parameters, encrypted vault format and native-readable output remain unchanged.
+
 - File creation requires definite missing-leaf evidence before using a checked parent when full-path resolution fails. Existing unresolved objects fail closed; this is not an atomic remote-filesystem sandbox.
 
 - Shared SSH resource listing and capacity checks avoid redundant filtering while preserving grants, ordering and connection lifecycle behavior.

@@ -190,6 +190,9 @@ importers:
       '@xterm/headless':
         specifier: 6.0.0
         version: 6.0.0
+      hash-wasm:
+        specifier: 4.12.0
+        version: 4.12.0
       ssh2:
         specifier: 1.17.0
         version: 1.17.0
@@ -809,6 +812,9 @@ packages:
   github-slugger@2.0.0:
     resolution: {integrity: sha512-IaOQ9puYtjrkq7Y0Ygl9KDZnrf/aiUJYUpVf89y8kyaxbRG7Y1SrX/jaumrv81vc61+kiMempujsM3Yw7w5qcw==}
 
+  hash-wasm@4.12.0:
+    resolution: {integrity: sha512-+/2B2rYLb48I/evdOIhP+K/DD2ca2fgBjp6O+GBEnCDk2e4rpeXIK8GvIyRPjTezgmWn9gmKwkQjjx6BtqDHVQ==}
+
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
 
@@ -1403,6 +1409,8 @@ snapshots:
       safe-regex2: 5.1.2
 
   github-slugger@2.0.0: {}
+
+  hash-wasm@4.12.0: {}
 
   inherits@2.0.4: {}
 

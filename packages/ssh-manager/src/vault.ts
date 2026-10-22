@@ -53,26 +53,52 @@ function validate(document: Envelope) {
   )
     fault("VAULT_VERSION", "Unsupported or invalid vault format; no data was changed.");
 }
-function derive(password: string, kdf: Envelope["kdf"]) {
+async function derive(password: string, kdf: Envelope["kdf"]) {
   const bytes = Buffer.from(password);
-  return new Promise<Buffer>((resolve, reject) => {
-    argon2(
-      "argon2id",
-      {
-        message: bytes,
-        nonce: Buffer.from(kdf.salt, "base64"),
-        memory: kdf.memory,
-        passes: kdf.passes,
+  try {
+    return await new Promise<Buffer>((resolve, reject) => {
+      argon2(
+        "argon2id",
+        {
+          message: bytes,
+          nonce: Buffer.from(kdf.salt, "base64"),
+          memory: kdf.memory,
+          passes: kdf.passes,
+          parallelism: kdf.parallelism,
+          tagLength: 32,
+        },
+        (error, result) => (error ? reject(error) : resolve(result)),
+      );
+    }).catch(async (error: unknown) => {
+      // Electron exposes the API but BoringSSL cannot execute it. Preserve the exact KDF;
+      // authentication errors and all other backend failures must never trigger a retry.
+      if (
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        error.code !== "ERR_CRYPTO_ARGON2_NOT_SUPPORTED"
+      )
+        throw error;
+      const { argon2id } = await import("hash-wasm");
+      const result = await argon2id({
+        password: bytes,
+        salt: Buffer.from(kdf.salt, "base64"),
+        memorySize: kdf.memory,
+        iterations: kdf.passes,
         parallelism: kdf.parallelism,
-        tagLength: 32,
-      },
-      (error, result) => {
-        bytes.fill(0);
-        error ? reject(error) : resolve(result);
-      },
-    );
-  });
+        hashLength: 32,
+        outputType: "binary",
+      });
+      try {
+        return Buffer.from(result);
+      } finally {
+        result.fill(0);
+      }
+    });
+  } finally {
+    bytes.fill(0);
+  }
 }
+
 export class Vault {
   private document?: Envelope;
   private key?: Buffer;
