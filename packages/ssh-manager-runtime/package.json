@@ -59,7 +59,7 @@
     "@stark-ai/ssh-manager": "workspace:*",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
-    "fastify": "5.12.5",
+    "fastify": "5.12.7",
     "ws": "8.22.0",
     "zod": "4.6.7"
   },
