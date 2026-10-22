@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { managedFixture, operator, agent, profileInput } from "./fixture.mjs";
 
 test("operator can explicitly discover only the SFTP start path without granting file access", async (t) => {
-  const { manager, profile } = await managedFixture(t, {
+  const { manager, profile, fixture } = await managedFixture(t, {
     ssh: { sftpStartDirectory: "/allowed" },
   });
   manager.setGrants(operator, profile.id, profile.revision, ["connect"]);
@@ -13,6 +13,34 @@ test("operator can explicitly discover only the SFTP start path without granting
   assert.deepEqual(manager.grants(operator, profile.id).capabilities, ["connect"]);
   manager.setGrants(operator, profile.id, profile.revision, []);
   await assert.rejects(manager.files.startDirectory(operator, profile.id), { code: "FORBIDDEN" });
+});
+
+test("an explicitly empty root set permits path discovery while all file paths remain denied", async (t) => {
+  const { manager, profile } = await managedFixture(t, { ssh: { sftpStartDirectory: "/allowed" } });
+  const restricted = manager.updateProfile(operator, profile.id, profile.revision, {
+    ...profileInput(profile),
+    fileRoots: [],
+  });
+  manager.confirmHost(operator, restricted.id, restricted.revision,
+    fixture.publicKey.toString("base64"), fixture.fingerprint);
+  manager.setGrants(operator, restricted.id, restricted.revision, [
+    "connect",
+    "files.read",
+    "files.write",
+  ]);
+  assert.deepEqual(manager.profiles(operator)[0].fileRoots, []);
+  assert.deepEqual(await manager.files.startDirectory(operator, restricted.id), {
+    path: "/allowed",
+  });
+  await assert.rejects(manager.files.list(operator, restricted.id, "/allowed"), {
+    code: "PATH_DENIED",
+  });
+  await assert.rejects(manager.files.stat(operator, restricted.id, "/allowed/hello.txt"), {
+    code: "PATH_DENIED",
+  });
+  await assert.rejects(manager.files.mutate(operator, restricted.id, "mkdir", "/new-root"), {
+    code: "PATH_DENIED",
+  });
 });
 
 test("directory discovery rejects noncanonical server paths without granting access", async (t) => {
