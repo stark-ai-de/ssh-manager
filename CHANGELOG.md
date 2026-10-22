@@ -21,6 +21,8 @@ User-visible changes are recorded here. `Unreleased` is not a published release,
 
 ### Changed
 
+- Unusable private-key data, missing/wrong passphrases and public-only keys report fixed `INVALID_CREDENTIAL` before attempting authentication with that key instead of exposing a raw parser error. Existing host verification and grants remain required; nothing is retried.
+
 - Vault Argon2id uses pinned `hash-wasm` only when native crypto reports `ERR_CRYPTO_ARGON2_NOT_SUPPORTED` (for example Electron/BoringSSL). Existing parameters, encrypted vault format and native-readable output remain unchanged.
 
 - File creation requires definite missing-leaf evidence before using a checked parent when full-path resolution fails. Existing unresolved objects fail closed; this is not an atomic remote-filesystem sandbox.

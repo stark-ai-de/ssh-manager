@@ -272,6 +272,15 @@ export class ConnectionPool extends EventEmitter {
         const client = new SSHClient();
         chain.push(client);
         try {
+          if (authentication.privateKey !== undefined) {
+            const parsed = ssh2.utils.parseKey(
+              authentication.privateKey,
+              authentication.passphrase,
+            );
+            const privateKey = Array.isArray(parsed) ? parsed[0] : parsed;
+            if (!privateKey || privateKey instanceof Error || !privateKey.isPrivateKey())
+              fault("INVALID_CREDENTIAL", "Private-key data or passphrase is not usable.");
+          }
           await new Promise<void>((resolve, reject) => {
             let settled = false;
             let verificationError: unknown;
