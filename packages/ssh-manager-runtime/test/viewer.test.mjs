@@ -90,6 +90,17 @@ test(
         "--fn",
         'document.querySelector("#status").textContent.startsWith("running")',
       ]);
+      // Session status precedes xterm's asynchronous snapshot parsing and paint.
+      await browser(
+        ["eval", "--stdin"],
+        'new Promise((resolve) => term.write("", () => {\n' +
+          "  const rendered = term.onRender(() => {\n" +
+          "    rendered.dispose();\n" +
+          '    resolve("terminal-rendered");\n' +
+          "  });\n" +
+          "  term.refresh(0, term.rows - 1);\n" +
+          "}));",
+      );
       await browser([
         "wait",
         "--fn",
