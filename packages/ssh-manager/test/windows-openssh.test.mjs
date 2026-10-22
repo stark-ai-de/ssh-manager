@@ -163,16 +163,27 @@ test(
     manager.sessions.detach(agent, terminal.id);
     manager.sessions.close(agent, terminal.id);
     let progress = 0;
-    const remote = `${root}/transfer.txt`;
+    const workspaceRoot = `${root}/workspace-A`;
+    await manager.files.mutate(agent, profile.id, "mkdir", workspaceRoot);
+    const scope = { roots: [workspaceRoot] };
+    const remote = `${workspaceRoot}/transfer.txt`;
     await manager.files.upload(agent, profile.id, remote, Readable.from(["native-sftp"]), {
+      scope,
       progress: (bytes) => {
         progress = bytes;
       },
     });
     assert.equal(progress, 11);
-    const data = await manager.files.read(agent, profile.id, remote);
+    await assert.rejects(manager.files.stat(agent, profile.id, root, undefined, scope), {
+      code: "PATH_DENIED",
+    });
+    await assert.rejects(
+      manager.files.list(agent, profile.id, workspaceRoot, undefined, { roots: [] }),
+      { code: "PATH_DENIED" },
+    );
+    const data = await manager.files.read(agent, profile.id, remote, 0, 65536, undefined, scope);
     assert.equal(Buffer.from(data.data, "base64").toString(), "native-sftp");
-    await manager.files.mutate(agent, profile.id, "remove", remote);
+    await manager.files.mutate(agent, profile.id, "remove", remote, { scope });
     echo = net.createServer((socket) => socket.pipe(socket));
     await new Promise((resolve) => echo.listen(0, "127.0.0.1", resolve));
     const tunnel = await manager.tunnels.create(agent, profile.id, {

@@ -75,7 +75,13 @@ export type FileMetadata = {
   file: boolean;
   symlink: boolean;
 };
-export type TransferOptions = { signal?: AbortSignal; progress?: (bytes: number) => void };
+/** Trusted embedder restriction intersected with profile roots; never grants authority. */
+export type FileScope = Readonly<{ roots: readonly string[] }>;
+export type TransferOptions = {
+  signal?: AbortSignal;
+  progress?: (bytes: number) => void;
+  scope?: FileScope;
+};
 export interface FileAPI {
   /** Explicit operator discovery: path metadata only, no root/content access granted. */
   startDirectory(actor: Actor, targetId: string, signal?: AbortSignal): Promise<{ path: string }>;
@@ -84,14 +90,27 @@ export interface FileAPI {
     targetId: string,
     remote: string,
     signal?: AbortSignal,
+    scope?: FileScope,
   ): Promise<(FileMetadata & { name: string })[]>;
-  stat(actor: Actor, targetId: string, remote: string, signal?: AbortSignal): Promise<FileMetadata>;
+  stat(
+    actor: Actor,
+    targetId: string,
+    remote: string,
+    signal?: AbortSignal,
+    scope?: FileScope,
+  ): Promise<FileMetadata>;
   mutate(
     actor: Actor,
     targetId: string,
     operation: "mkdir" | "rename" | "remove" | "chmod",
     remote: string,
-    options?: { destination?: string; mode?: number; directory?: boolean; signal?: AbortSignal },
+    options?: {
+      destination?: string;
+      mode?: number;
+      directory?: boolean;
+      signal?: AbortSignal;
+      scope?: FileScope;
+    },
   ): Promise<{ completed: boolean }>;
   download(
     actor: Actor,
@@ -113,6 +132,7 @@ export interface FileAPI {
     offset?: number,
     length?: number,
     signal?: AbortSignal,
+    scope?: FileScope,
   ): Promise<{ data: string; encoding: "base64"; offset: number; bytes: number }>;
 }
 export interface TunnelAPI {

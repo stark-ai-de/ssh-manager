@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
+import { Readable } from "node:stream";
 import { spawn, spawnSync } from "node:child_process";
 import { generateKeyPairSync, createHash } from "node:crypto";
 import ssh2 from "ssh2";
@@ -124,6 +125,46 @@ test(
     manager.setGrants(operator, profile.id, 1, allCapabilities);
     assert.deepEqual(await manager.files.startDirectory(operator, profile.id), {
       path: fs.realpathSync(os.homedir()),
+    });
+    const workspaceRoot = path.join(directory, "workspace-A");
+    fs.mkdirSync(workspaceRoot, { mode: 0o700 });
+    const outside = path.join(directory, "workspace-B");
+    fs.mkdirSync(outside, { mode: 0o700 });
+    fs.writeFileSync(path.join(outside, "private.txt"), "other-workspace");
+    fs.symlinkSync(outside, path.join(workspaceRoot, "cross-root"));
+    fs.symlinkSync(path.join(outside, "must-not-exist.txt"), path.join(workspaceRoot, "dangling"));
+    await assert.rejects(
+      manager.files.upload(
+        agent,
+        profile.id,
+        path.join(workspaceRoot, "dangling"),
+        Readable.from("blocked"),
+        { scope: { roots: [workspaceRoot] } },
+      ),
+      { code: "PATH_DENIED" },
+    );
+    assert.equal(fs.existsSync(path.join(outside, "must-not-exist.txt")), false);
+    const scope = { roots: [workspaceRoot] };
+    assert.deepEqual(
+      await manager.files
+        .list(agent, profile.id, workspaceRoot, undefined, scope)
+        .then((entries) => entries.map((entry) => entry.name).sort()),
+      ["cross-root", "dangling"],
+    );
+    await assert.rejects(
+      manager.files.read(
+        agent,
+        profile.id,
+        path.join(workspaceRoot, "cross-root", "private.txt"),
+        0,
+        65536,
+        undefined,
+        scope,
+      ),
+      { code: "PATH_DENIED" },
+    );
+    await assert.rejects(manager.files.stat(agent, profile.id, authorized, undefined, scope), {
+      code: "PATH_DENIED",
     });
     const job = await manager.jobs.start(agent, profile.id, "printf native-open-ssh");
     await until(() => manager.jobs.read(agent, job.id).job.state !== "running");

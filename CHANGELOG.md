@@ -6,6 +6,8 @@ User-visible changes are recorded here. `Unreleased` is not a published release,
 
 ### Added
 
+- Optional direct-library `FileScope` restricts individual SFTP operations to an immutable intersection with the existing target roots; omitted scope keeps existing grants/root behavior.
+
 - Human first-connection, MCP, library/client, configuration, compatibility, troubleshooting and operations guides.
 - Architecture, approval, terminal-lifecycle and distribution diagrams, plus a sourced alternatives comparison.
 - Contribution, support, security-reporting, conduct and governance policies; issue forms and a PR checklist.
@@ -19,6 +21,8 @@ User-visible changes are recorded here. `Unreleased` is not a published release,
 
 ### Changed
 
+- File creation requires definite missing-leaf evidence before using a checked parent when full-path resolution fails. Existing unresolved objects fail closed; this is not an atomic remote-filesystem sandbox.
+
 - Shared SSH resource listing and capacity checks avoid redundant filtering while preserving grants, ordering and connection lifecycle behavior.
 - `pnpm validate` now includes formatting, documentation and consumer-package checks as well as build/tests.
 - README now explains intended audiences, early-stage support, safe onboarding and project boundaries.
@@ -28,4 +32,4 @@ User-visible changes are recorded here. `Unreleased` is not a published release,
 - Session output sent to a viewer no longer extends the viewer client's registration, so a silent client expires on time. Expiry or client detach now closes that client's viewer sockets; its sessions keep running.
 - `ManagementClient.close()` rejects an invalid `timeout` or `capacityClass` with `INVALID_ARGUMENT` before closing, so a later valid close still detaches.
 
-Apart from the entries above, no SSH runtime behavior, authentication model, state format or public API was intentionally changed. No GitHub Release, npm publication or live-state migration is implied by this entry.
+The entries above include the stated public API and SFTP behavior changes. The authentication model and state format are unchanged. No GitHub Release, npm publication or live-state migration is implied by this entry.
