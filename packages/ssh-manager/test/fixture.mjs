@@ -245,6 +245,12 @@ export async function sshFixture(options = {}) {
             sftp.on(
               "REALPATH",
               guarded((req, value) => {
+                if (value === "." && options.sftpStartReply !== undefined) {
+                  sftp.name(req, [{ filename: options.sftpStartReply, longname: "", attrs: {} }]);
+                  return;
+                }
+                if (value === "." && options.hangStartDirectory) return;
+                if (value === ".") value = options.sftpStartDirectory ?? "/";
                 const actual = fs.realpathSync(remote(value));
                 const name = "/" + path.relative(directory, actual).split(path.sep).join("/");
                 sftp.name(req, [

@@ -15,18 +15,19 @@ export class Files {
     private maximum: number,
     private fileBytes: number,
   ) {}
-  private async open(actor: Actor, targetId: string, write: boolean, signal?: AbortSignal) {
-    const profile = this.authorize(actor, targetId, write ? "files.write" : "files.read");
+  private async open(
+    actor: Actor,
+    targetId: string,
+    write: boolean | "discover",
+    signal?: AbortSignal,
+  ) {
+    const capability = write === "discover" ? "connect" : write ? "files.write" : "files.read";
+    const profile = this.authorize(actor, targetId, capability);
     if (this.active >= this.maximum) fault("LIMIT", "File transfer limit reached.");
     this.active++;
     let lease: Lease | undefined;
     try {
-      lease = await this.pool.acquire(
-        actor,
-        targetId,
-        write ? "files.write" : "files.read",
-        signal,
-      );
+      lease = await this.pool.acquire(actor, targetId, capability, signal);
       const sftp = await request<SFTPWrapper>(
         (cb) => lease!.client.sftp(cb),
         this.pool.limits.channelTimeout,
@@ -49,6 +50,32 @@ export class Files {
       lease?.release();
       this.active--;
       throw error;
+    }
+  }
+  async startDirectory(actor: Actor, targetId: string, signal?: AbortSignal) {
+    if (actor.kind !== "operator")
+      fault("FORBIDDEN", "SFTP directory discovery requires an operator.");
+    const ctx = await this.open(actor, targetId, "discover", signal);
+    try {
+      const actual = await request<string>(
+        (cb) => ctx.sftp.realpath(".", cb),
+        this.pool.limits.channelTimeout,
+        signal,
+      );
+      if (
+        typeof actual !== "string" ||
+        !actual.startsWith("/") ||
+        actual.length > 2048 ||
+        /[\\\x00-\x1f\x7f]/.test(actual) ||
+        path.posix.normalize(actual) !== actual
+      )
+        fault("PATH_DENIED", "Server did not return a canonical absolute SFTP start path.");
+      if (this.authorize(actor, targetId, "connect").revision !== ctx.profile.revision)
+        fault("CONFLICT", "Target changed during directory discovery.");
+      aborted(signal);
+      return { path: actual };
+    } finally {
+      ctx.close();
     }
   }
   private async checked(
