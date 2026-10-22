@@ -18,10 +18,9 @@ export class Files {
   private async open(
     actor: Actor,
     targetId: string,
-    write: boolean | "discover",
+    capability: "connect" | "files.read" | "files.write",
     signal?: AbortSignal,
   ) {
-    const capability = write === "discover" ? "connect" : write ? "files.write" : "files.read";
     const profile = this.authorize(actor, targetId, capability);
     if (this.active >= this.maximum) fault("LIMIT", "File transfer limit reached.");
     this.active++;
@@ -55,7 +54,7 @@ export class Files {
   async startDirectory(actor: Actor, targetId: string, signal?: AbortSignal) {
     if (actor.kind !== "operator")
       fault("FORBIDDEN", "SFTP directory discovery requires an operator.");
-    const ctx = await this.open(actor, targetId, "discover", signal);
+    const ctx = await this.open(actor, targetId, "connect", signal);
     try {
       const actual = await request<string>(
         (cb) => ctx.sftp.realpath(".", cb),
@@ -139,7 +138,7 @@ export class Files {
     };
   }
   async list(actor: Actor, targetId: string, remote: string, signal?: AbortSignal) {
-    const ctx = await this.open(actor, targetId, false, signal);
+    const ctx = await this.open(actor, targetId, "files.read", signal);
     try {
       const actual = await this.checked(ctx.sftp, ctx.profile, remote, false, signal);
       const handle = await request<Buffer>(
@@ -179,7 +178,7 @@ export class Files {
     }
   }
   async stat(actor: Actor, targetId: string, remote: string, signal?: AbortSignal) {
-    const ctx = await this.open(actor, targetId, false, signal);
+    const ctx = await this.open(actor, targetId, "files.read", signal);
     try {
       const actual = await this.checked(ctx.sftp, ctx.profile, remote, false, signal);
       return this.metadata(
@@ -205,7 +204,7 @@ export class Files {
       signal?: AbortSignal;
     } = {},
   ) {
-    const ctx = await this.open(actor, targetId, true, options.signal);
+    const ctx = await this.open(actor, targetId, "files.write", options.signal);
     try {
       const actual = await this.checked(
         ctx.sftp,
@@ -248,7 +247,7 @@ export class Files {
     remote: string,
     options: TransferOptions & { offset?: number; length?: number } = {},
   ): Promise<Readable> {
-    const ctx = await this.open(actor, targetId, false, options.signal);
+    const ctx = await this.open(actor, targetId, "files.read", options.signal);
     try {
       const actual = await this.checked(ctx.sftp, ctx.profile, remote, false, options.signal);
       const stats = await request<Stats>(
@@ -312,7 +311,7 @@ export class Files {
     input: Readable,
     options: TransferOptions & { mode?: number } = {},
   ) {
-    const ctx = await this.open(actor, targetId, true, options.signal);
+    const ctx = await this.open(actor, targetId, "files.write", options.signal);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const actual = await this.checked(ctx.sftp, ctx.profile, remote, true, options.signal);

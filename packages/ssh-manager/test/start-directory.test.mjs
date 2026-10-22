@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { managedFixture, operator, agent } from "./fixture.mjs";
+import { managedFixture, operator, agent, profileInput } from "./fixture.mjs";
 
 test("operator can explicitly discover only the SFTP start path without granting file access", async (t) => {
   const { manager, profile } = await managedFixture(t, {
@@ -35,4 +35,27 @@ test("directory discovery honors cancellation and channel deadlines", async (t) 
     code: "CANCELLED",
   });
   await assert.rejects(manager.files.startDirectory(operator, profile.id), { code: "TIMEOUT" });
+});
+
+test("a revoke or target change during discovery cannot return a stale path", async (t) => {
+  for (const change of ["revoke", "revision"]) {
+    await t.test(change, async (t) => {
+      let invalidate;
+      const { manager, profile } = await managedFixture(t, {
+        ssh: { onStartDirectory: () => invalidate() },
+        limits: { channelTimeout: 150 },
+      });
+      invalidate = () => {
+        if (change === "revoke") manager.setGrants(operator, profile.id, profile.revision, []);
+        else {
+          const next = manager.updateProfile(operator, profile.id, profile.revision, {
+            ...profileInput(profile),
+            username: "changed-user",
+          });
+          manager.setGrants(operator, profile.id, next.revision, ["connect"]);
+        }
+      };
+      await assert.rejects(manager.files.startDirectory(operator, profile.id));
+    });
+  }
 });

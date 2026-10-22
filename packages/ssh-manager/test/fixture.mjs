@@ -245,6 +245,7 @@ export async function sshFixture(options = {}) {
             sftp.on(
               "REALPATH",
               guarded((req, value) => {
+                if (value === ".") options.onStartDirectory?.();
                 if (value === "." && options.sftpStartReply !== undefined) {
                   sftp.name(req, [{ filename: options.sftpStartReply, longname: "", attrs: {} }]);
                   return;
