@@ -146,10 +146,20 @@ test(
     await manager.sessions.attach(agent, terminal.id);
     manager.sessions.writer(agent, terminal.id);
     assert.ok(
-      manager.sessions.input(agent, terminal.id, "echo disposable-terminal\r").accepted > 0,
+      manager.sessions.input(
+        agent,
+        terminal.id,
+        "[Console]::WriteLine(('native-pty-' + 'result'))\r",
+      ).accepted > 0,
     );
     manager.sessions.resize(agent, terminal.id, 100, 32);
-    await until(() => manager.sessions.read(agent, terminal.id).output.parts.length, 10000);
+    await until(
+      () =>
+        manager.sessions
+          .read(agent, terminal.id)
+          .output.parts.some((part) => part.text.includes("native-pty-result")),
+      10000,
+    );
     manager.sessions.detach(agent, terminal.id);
     manager.sessions.close(agent, terminal.id);
     let progress = 0;
