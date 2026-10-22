@@ -609,6 +609,17 @@ export class ManagementClient {
     } = {},
   ): Promise<void> {
     if (this.#closing) return this.#closing;
+    // Reject before latching close, so an invalid option never skips the detach.
+    if (
+      (options.timeout !== undefined &&
+        (!Number.isSafeInteger(options.timeout) ||
+          options.timeout < 1 ||
+          options.timeout > 2147483647)) ||
+      (options.capacityClass !== undefined &&
+        options.capacityClass !== "ordinary" &&
+        options.capacityClass !== "control")
+    )
+      return Promise.reject(new APIError("INVALID_ARGUMENT", "Invalid client close options."));
     this.#closed = true;
     clearInterval(this.#timer);
     const pending = [...this.#pending];

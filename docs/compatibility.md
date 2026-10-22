@@ -25,8 +25,10 @@ The last pre-readiness main workflow inspected was [run 38283554540](https://git
 ## Known boundaries
 
 - SSH `known_hosts` support includes ordinary patterns/hashed names and revocation checks, not host certificates/CA authentication.
-- SSH config import is a safe subset, not full OpenSSH configuration evaluation. No `ProxyCommand` execution, `Include` expansion or implicit key/trust import.
-- `posix`, `powershell` and `cmd` shell modes exist, but protocol support is not native target-platform qualification.
+- SSH config import is a safe subset, not full OpenSSH configuration evaluation. No `ProxyCommand` execution, `Include` expansion, `Match` evaluation or implicit key/trust import.
+- `posix`, `powershell` and `cmd` shell modes exist. Fixtures pin their exact job and interactive launch commands; that is not native Windows OpenSSH target qualification.
+- Key exchange, host-key, cipher and MAC negotiation use the ssh2 1.17.0 defaults. There is no automatic fallback to weaker or legacy algorithms; a server that offers only those fails the handshake.
+- Password credentials also answer one hidden `keyboard-interactive` prompt. Multi-factor or other challenge prompts are not supported.
 - WSL and Windows have separate default state and credential contexts. Do not share one live directory across them.
 - The viewer attaches to existing sessions; it is not a full graphical host/vault administration application.
 - Authentication/grants are local and shared by the state owner; there is no SSO, multi-tenant RBAC, cloud synchronization or hosted control plane.

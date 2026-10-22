@@ -49,6 +49,7 @@ export async function createRuntime(
     ajv: { customOptions: { removeAdditional: false } },
   });
   const clients = new Map<string, Registration>();
+  const viewers = new Map<string, Set<() => void>>();
   const ttl = options.clientTtlMs ?? 120000;
   app.server.maxConnections = 256;
   let activeViewers = 0;
@@ -68,12 +69,21 @@ export async function createRuntime(
     let origin = "";
     const extract = (authorization?: string) =>
       authorization?.startsWith("Bearer ") ? authorization.slice(7) : "";
-    const authenticate = (token: string): Actor => {
+    const registered = (token: string) => {
       const registration = clients.get(hash(token));
       if (!registration || registration.expires <= Date.now())
         throw new ManagementError("UNAUTHENTICATED", "Register an authenticated local API client.");
+      return registration;
+    };
+    // Only client activity extends a registration; server-initiated viewer output must not.
+    const authenticate = (token: string): Actor => {
+      const registration = registered(token);
       registration.expires = Date.now() + ttl;
       return registration.actor;
+    };
+    const release = (key: string) => {
+      clients.delete(key);
+      for (const close of [...(viewers.get(key) ?? [])]) close();
     };
     const actor = (req: FastifyRequest) => authenticate(extract(req.headers.authorization));
     expiry = setInterval(
@@ -81,7 +91,7 @@ export async function createRuntime(
         for (const [token, registration] of clients)
           if (registration.expires <= Date.now()) {
             manager.detachActor(registration.actor.id);
-            clients.delete(token);
+            release(token);
           }
       },
       Math.min(30000, ttl),
@@ -150,7 +160,7 @@ export async function createRuntime(
     app.post("/v1/clients/detach", async (req) => {
       const identity = actor(req);
       manager.detachActor(identity.id);
-      clients.delete(hash(extract(req.headers.authorization)));
+      release(hash(extract(req.headers.authorization)));
       return { data: { detached: true } };
     });
     const paths: Record<string, unknown> = {};
@@ -378,7 +388,7 @@ export async function createRuntime(
       const event = (e: ManagerEvent) => {
         if (!identity || !sessionId || e.id !== sessionId) return;
         try {
-          authenticate(token);
+          registered(token);
           manager.sessions.read(identity, sessionId);
           send(e);
         } catch {
@@ -386,6 +396,7 @@ export async function createRuntime(
         }
       };
       let token = "";
+      const revoke = () => socket.close(1008, "Client registration ended");
       socket.on("message", (message) => {
         if (closed) return;
         if (++queued > 16) {
@@ -403,6 +414,8 @@ export async function createRuntime(
                 .parse(body);
               token = auth.token;
               identity = authenticate(token);
+              const key = hash(token);
+              viewers.set(key, (viewers.get(key) ?? new Set()).add(revoke));
               sessionId = auth.sessionId;
               reader = manager.sessions.attachWithCleanup(identity, sessionId);
               const snapshot = await reader.snapshot;
@@ -448,6 +461,12 @@ export async function createRuntime(
         closed = true;
         activeViewers--;
         clearTimeout(authTimeout);
+        if (identity) {
+          const key = hash(token);
+          const set = viewers.get(key);
+          set?.delete(revoke);
+          if (!set?.size) viewers.delete(key);
+        }
         manager.off("event", event);
         try {
           reader?.detach();
