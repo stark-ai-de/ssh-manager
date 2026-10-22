@@ -33,7 +33,7 @@ export const profileInput = z.strictObject({
   shell: z.enum(["posix", "powershell", "cmd"]).default("posix"),
   jumpIds: identifier.array().max(4).default([]),
   proxy: proxySchema.optional(),
-  fileRoots: z.string().min(1).max(1024).array().min(1).max(16).default(["/"]),
+  fileRoots: z.string().min(1).max(1024).array().max(16).default(["/"]),
 });
 export type ProfileInput = z.input<typeof profileInput>;
 export type Profile = z.infer<typeof profileInput> & { id: string; revision: number };

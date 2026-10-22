@@ -20,6 +20,11 @@ Agents and HTTP/MCP callers have no discovery endpoint. Embedders must bind oper
 and the explicit user action themselves. Windows paths use the server's SFTP namespace, not a
 derived local home path.
 
+An explicitly empty `fileRoots: []` is a deny-all file policy. It allows connect-only
+setup and start-directory discovery before a human selects a root. The existing default
+for omitted `fileRoots` remains unchanged; embedders that require deliberate path approval
+must supply the empty set explicitly. Granting file capabilities does not override it.
+
 - **Distribution integrity:** build/artifact manifests, exact source identity, dependency notices and full-inventory verification support reviewed distribution.
 
 ## What is not protected

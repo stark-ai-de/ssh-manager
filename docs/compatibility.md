@@ -7,6 +7,7 @@
 - Node.js **24.18.0 or newer**; CI uses 24.18.0. Newer Node versions are not all independently qualified.
 - pnpm **12.9.1** for source development; the standalone runtime bundle only needs Node.
 - Native state owned by one OS user, with separate directories for independent embedded instances or daemon environments.
+- Explicit empty SFTP root arrays are supported by the current profile/state validator. Older builds that required at least one root cannot reopen a state containing them. Keep the pre-upgrade backup; do not weaken the root policy to make a downgrade load. Rollback still requires separately verified state compatibility.
 - Optional tmux must already exist on a compatible Unix target. It is never installed automatically.
 
 ## Evidence matrix
