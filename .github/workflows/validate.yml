@@ -34,6 +34,20 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update && sudo apt-get install -y openssh-server tmux; else brew install tmux; fi
           SSH_MANAGER_NATIVE_TESTS=1 SSH_MANAGER_SSHD="$(command -v sshd)" SSH_MANAGER_TMUX="$(command -v tmux)" pnpm test
+      - name: Native Windows OpenSSH fixture
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sshd = Join-Path $env:WINDIR 'System32/OpenSSH/sshd.exe'
+          if (!(Test-Path $sshd)) {
+            Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0' | Out-Null
+          }
+          if (!(Test-Path $sshd)) { throw 'Windows OpenSSH server unavailable' }
+          $env:SSH_MANAGER_WINDOWS_TESTS = '1'
+          $env:SSH_MANAGER_SSHD = $sshd
+          node --test packages/ssh-manager/test/windows-openssh.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Export exact committed candidate
         run: pnpm artifact
       - name: Verify exported inventory and record its digest
