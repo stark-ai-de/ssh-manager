@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { managedFixture, operator, agent, profileInput } from "./fixture.mjs";
 
 test("operator can explicitly discover only the SFTP start path without granting file access", async (t) => {
-  const { manager, profile, fixture } = await managedFixture(t, {
+  const { manager, profile } = await managedFixture(t, {
     ssh: { sftpStartDirectory: "/allowed" },
   });
   manager.setGrants(operator, profile.id, profile.revision, ["connect"]);
@@ -16,13 +16,20 @@ test("operator can explicitly discover only the SFTP start path without granting
 });
 
 test("an explicitly empty root set permits path discovery while all file paths remain denied", async (t) => {
-  const { manager, profile } = await managedFixture(t, { ssh: { sftpStartDirectory: "/allowed" } });
+  const { manager, profile, fixture } = await managedFixture(t, {
+    ssh: { sftpStartDirectory: "/allowed" },
+  });
   const restricted = manager.updateProfile(operator, profile.id, profile.revision, {
     ...profileInput(profile),
     fileRoots: [],
   });
-  manager.confirmHost(operator, restricted.id, restricted.revision,
-    fixture.publicKey.toString("base64"), fixture.fingerprint);
+  manager.confirmHost(
+    operator,
+    restricted.id,
+    restricted.revision,
+    fixture.publicKey.toString("base64"),
+    fixture.fingerprint,
+  );
   manager.setGrants(operator, restricted.id, restricted.revision, [
     "connect",
     "files.read",
