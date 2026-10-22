@@ -77,6 +77,8 @@ export type FileMetadata = {
 };
 export type TransferOptions = { signal?: AbortSignal; progress?: (bytes: number) => void };
 export interface FileAPI {
+  /** Explicit operator discovery: path metadata only, no root/content access granted. */
+  startDirectory(actor: Actor, targetId: string, signal?: AbortSignal): Promise<{ path: string }>;
   list(
     actor: Actor,
     targetId: string,

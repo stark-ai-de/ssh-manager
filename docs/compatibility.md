@@ -11,14 +11,15 @@
 
 ## Evidence matrix
 
-| Surface                     | Existing check                                                                                     | What it does not prove                                                                        |
-| --------------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Linux, macOS, Windows hosts | Hosted matrix builds, default temporary SSH/API/MCP fixtures and artifact export                   | Every host distribution, target OS, corporate proxy or native credential-agent implementation |
-| Unix native SSH/tmux        | Opt-in isolated OpenSSH, key-file/agent and tmux-recovery fixture; CI runs on Linux/macOS          | Windows native OpenSSH/tmux support or production reboot survival                             |
-| Browser viewer              | Real agent-browser/Chrome fixture: input/paste, writer expiry, detach/reattach, memory-only tokens | Safari/Firefox/mobile/accessibility qualification or every Chrome release                     |
-| MCP                         | Protocol fixtures for legacy `2025-06-18` initialization and `2026-07-28` discovery/envelopes      | Installation and approval UX of every MCP host                                                |
-| Consumer packages           | Local tarball inventory and workspace-dependency rewrite checks                                    | Public registry publication or all consumer bundlers                                          |
-| Runtime bundle              | Reproducible canonical-source builds; manifest/inventory tests                                     | Signed publisher identity, actual publication or a live install switch                        |
+| Surface                     | Existing check                                                                                                                                                       | What it does not prove                                                                                      |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Linux, macOS, Windows hosts | Hosted matrix builds, default temporary SSH/API/MCP fixtures and artifact export                                                                                     | Every host distribution, target OS, corporate proxy or native credential-agent implementation               |
+| Unix native SSH/tmux        | Opt-in isolated OpenSSH, key-file/agent and tmux-recovery fixture; CI runs on Linux/macOS                                                                            | Windows native OpenSSH/tmux support or production reboot survival                                           |
+| Windows native SSH          | Opt-in isolated Windows OpenSSH fixture: disposable keys, start-directory discovery, PTY, PowerShell UTF-8, SFTP transfer and loopback tunnel; Windows CI invokes it | Packaged Electron integration, Windows agent/key store, every target shell or service installation workflow |
+| Browser viewer              | Real agent-browser/Chrome fixture: input/paste, writer expiry, detach/reattach, memory-only tokens                                                                   | Safari/Firefox/mobile/accessibility qualification or every Chrome release                                   |
+| MCP                         | Protocol fixtures for legacy `2025-06-18` initialization and `2026-07-28` discovery/envelopes                                                                        | Installation and approval UX of every MCP host                                                              |
+| Consumer packages           | Local tarball inventory and workspace-dependency rewrite checks                                                                                                      | Public registry publication or all consumer bundlers                                                        |
+| Runtime bundle              | Reproducible canonical-source builds; manifest/inventory tests                                                                                                       | Signed publisher identity, actual publication or a live install switch                                      |
 
 The last pre-readiness main workflow inspected was [run 38283554540](https://github.com/stark-ai-de/ssh-manager/actions/runs/38283554540), at source `9e6fb23d451b2900d8ea1653cf6d578cc20b4fa4`. Consult the [current workflows](https://github.com/stark-ai-de/ssh-manager/actions) for evidence for a newer revision. Adding a CI job is not evidence it has run successfully.
 
@@ -26,7 +27,7 @@ The last pre-readiness main workflow inspected was [run 38283554540](https://git
 
 - SSH `known_hosts` support includes ordinary patterns/hashed names and revocation checks, not host certificates/CA authentication.
 - SSH config import is a safe subset, not full OpenSSH configuration evaluation. No `ProxyCommand` execution, `Include` expansion, `Match` evaluation or implicit key/trust import.
-- `posix`, `powershell` and `cmd` shell modes exist. Fixtures pin their exact job and interactive launch commands; that is not native Windows OpenSSH target qualification.
+- `posix`, `powershell` and `cmd` shell modes exist. Synthetic fixtures pin their exact launch commands; the opt-in native Windows fixture separately covers its declared PowerShell/PTY/SFTP/tunnel path. Neither establishes all shell/platform combinations.
 - Key exchange, host-key, cipher and MAC negotiation use the ssh2 1.17.0 defaults. There is no automatic fallback to weaker or legacy algorithms; a server that offers only those fails the handshake.
 - Password credentials also answer one hidden `keyboard-interactive` prompt. Multi-factor or other challenge prompts are not supported.
 - WSL and Windows have separate default state and credential contexts. Do not share one live directory across them.

@@ -10,6 +10,16 @@ This document explains implemented boundaries; it is not an independent security
 - **Authenticated writer identity:** the runtime assigns client identities. Several readers can attach; input/resize require the client's writer lease. Agents cannot force handoff.
 - **Local transport:** loopback binding, bearer authentication, Host/Origin checks, bounded requests and short-lived registered clients limit remote/browser attack paths. Tokens are not URL parameters.
 - **Resource containment:** SFTP roots, connection/channel/session/output/transfer limits and schema validation apply across access paths.
+
+The direct library exposes an explicit operator-only `files.startDirectory` discovery operation.
+It requires the current target's `connect` grant, host verification and authentication, opens a
+bounded SFTP channel and returns only its canonical absolute `REALPATH .` result. It does not
+list/read files, change grants/roots, execute a shell, or write remote data. The returned path
+is a proposal for human review, not file authority or proof of directory ownership/permissions.
+Agents and HTTP/MCP callers have no discovery endpoint. Embedders must bind operator identity
+and the explicit user action themselves. Windows paths use the server's SFTP namespace, not a
+derived local home path.
+
 - **Distribution integrity:** build/artifact manifests, exact source identity, dependency notices and full-inventory verification support reviewed distribution.
 
 ## What is not protected
