@@ -255,3 +255,35 @@ The performance step adds **78 test lines and zero net production lines** to the
 | **All source** | **14,307** | **14,680**  | **601** | **228** | **+373** |
 
 Counts include all tracked and non-ignored source additions, including the ADR, this specification, changelog and regression tests. Generated builds/dependencies, isolated worktree copies and temporary validation snapshots/harnesses are outside maintained-source accounting, consistently with the initial inventory. The existing four dependency edits are preserved in the original workspace; they are absent from the PR diff. Public declarations, package exports, security/lifecycle contracts and runtime adapters retain the validated behavior. The changes are ready for the requested PR; publication, merge and live operations remain outside scope.
+
+## Managed runtime fixture ownership
+
+The separately approved architecture follow-up starts from clean source revision `ef94a28d26b0c59bdd528cae4c50c0f97027c159`. Its complete scope is `packages/ssh-manager-runtime/test/api.test.mjs`, `client-lifecycle.test.mjs`, the new runtime `test/fixture.mjs` and `test/fixture-lifetime.test.mjs`, `GLOSSARY.md` and this specification. A private baseline captures original file bytes and records both new paths as absent. Production, dependencies, generated output and other contributors' worktrees are outside this change.
+
+The runtime test fixture owns its temporary state, local runtime and authenticated operator/agent clients. Both existing callers use that owner instead of repeating acquisition and chained cleanup. Ownership is registered before allocation or asynchronous setup, each client is retained before registration, and partial setup rolls back. Every cleanup step is attempted after earlier failures; setup and cleanup errors remain observable together. Repeated close shares one promise and the same success or aggregated failure. Fixture clients use existing strict cleanup so detach failures cannot disappear into best-effort close.
+
+Target setup, human grants, TTL/heartbeat behavior, WebSocket writer checks and all original scenario assertions remain in the callers. Heartbeat cleanup is registered before runtime acquisition so it runs before runtime release. The synthetic SSH counterpart remains independently owned, as do browser, daemon and native fixtures. This is a narrow follow-up to retained R08, not a shared fixture framework or a change to public management behavior.
+
+### Contract evidence
+
+The new lifetime tests exercise the fixture interface with real loopback runtime/client resources. They cover actual test-lifetime release; allocation, runtime startup and either client-registration failure; failed hook registration; all four cleanup stages failing; repeated-close promise/error identity; and combined setup/rollback failure. A failed client remains owned, closed listeners and removed state are checked, and failed state removal remains visible. Faults use existing test mocks; no production injection seam is added.
+
+| Check                                             | Result                                                                                              |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Focused fixture and both existing caller files    | 16 tests passed, no skips.                                                                          |
+| `pnpm validate`                                   | Passed: 278 tests, three optional skips; formatting, build, docs and offline package checks passed. |
+| Available native/browser fixtures via `pnpm test` | Passed: 280 tests, one Windows-only skip; real isolated OpenSSH/tmux and browser fixtures ran.      |
+| Hosted, published and live SSH evidence           | Not established for this uncommitted change; no publication or live SSH operation is included.      |
+
+### Follow-up accounting and completion
+
+The totals below compare all six scope paths with the fixed baseline and include both new support files. No generated files or pre-existing edits are attributed. These are incremental totals for this follow-up; historical accounting above is unchanged.
+
+| Category        | Added | Deleted | Net  |
+| --------------- | ----- | ------- | ---- |
+| Production      | 0     | 0       | 0    |
+| Tests/fixtures  | 249   | 46      | +203 |
+| Documentation   | 35    | 0       | +35  |
+| All scope files | 284   | 46      | +238 |
+
+No code-reduction claim applies. One owner replaces repeated runtime setup/cleanup obligations, while regression proof increases maintained code. The final complete pass over this bounded scope found no further qualifying candidate: test-specific SSH approvals, expiry controls and direct protocol probes remain with their scenarios. Expanding fixture ownership requires another actual caller with matching acquisition and cleanup semantics. MCP request ownership remains a separate unimplemented architecture candidate.

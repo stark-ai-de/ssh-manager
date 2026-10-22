@@ -14,3 +14,6 @@ The successful data returned by one authenticated management operation. Runtime 
 
 **Managed SSH fixture**:
 An isolated synthetic SSH counterpart and approved manager owned by one test lifetime. Native OpenSSH qualification supplies distinct evidence and remains separately owned.
+
+**Managed runtime fixture**:
+An isolated local SSH Manager runtime and its authenticated operator and agent clients owned by one test lifetime. SSH counterparts and native/browser qualification remain separately owned.
