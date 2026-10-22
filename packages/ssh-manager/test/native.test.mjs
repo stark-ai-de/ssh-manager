@@ -122,6 +122,9 @@ test(
       "SHA256:" + createHash("sha256").update(hostSSH).digest("base64").replace(/=+$/, ""),
     );
     manager.setGrants(operator, profile.id, 1, allCapabilities);
+    assert.deepEqual(await manager.files.startDirectory(operator, profile.id), {
+      path: fs.realpathSync(os.homedir()),
+    });
     const job = await manager.jobs.start(agent, profile.id, "printf native-open-ssh");
     await until(() => manager.jobs.read(agent, job.id).job.state !== "running");
     assert.equal(manager.jobs.read(agent, job.id).job.exitCode, 0);
