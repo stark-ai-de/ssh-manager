@@ -51,7 +51,7 @@ test(
     };
     const hostFile = write("host.key", hostKey);
     // Node's Unix mode cannot establish Windows ACLs. Restrict our newly-created key only.
-    const protectKey = `$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; $acl = New-Object System.Security.AccessControl.FileSecurity; $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User; $acl.SetOwner($sid); $acl.SetAccessRuleProtection($true, $false); foreach ($identity in @($sid, (New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-18'), (New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-32-544'))) { $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, 'FullControl', 'Allow'); $acl.AddAccessRule($rule) }; Set-Acl -LiteralPath $env:SSH_MANAGER_FIXTURE_KEY -AclObject $acl`;
+    const protectKey = `$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; $acl = New-Object System.Security.AccessControl.FileSecurity; $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User; $acl.SetOwner($sid); $acl.SetAccessRuleProtection($true, $false); foreach ($identity in @($sid, (New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-18'), (New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-32-544'))) { $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, 'FullControl', 'Allow'); $acl.AddAccessRule($rule) }; [System.IO.File]::SetAccessControl($env:SSH_MANAGER_FIXTURE_KEY, $acl)`;
     execFileSync(
       path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
       [
