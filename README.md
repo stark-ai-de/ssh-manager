@@ -69,7 +69,7 @@ Package names, public exports and the `/v1/` API are preserved. No Mechas or Ski
 
 ```sh
 pnpm validate          # formatting, build, docs, tests and local package checks
-pnpm test              # fixtures after a build; no real server credentials
+pnpm test              # fixtures; builds first when dist/ is missing or stale; no real server credentials
 pnpm docs:check        # offline Markdown links/anchors, JSON examples and YAML syntax
 pnpm pack:check        # inspect local package tarballs; never publishes
 ```
