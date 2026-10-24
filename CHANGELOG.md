@@ -21,6 +21,8 @@ User-visible changes are recorded here. `Unreleased` is not a published release,
 
 ### Changed
 
+- Local and SOCKS tunnels reserve their selected loopback port before SSH connection setup, preventing the new transport from occupying that port itself. Pending listeners do not forward traffic; abort, close, authority revocation and shutdown release them without replay or port substitution.
+
 - Unusable private-key data, missing/wrong passphrases and public-only keys report fixed `INVALID_CREDENTIAL` before attempting authentication with that key instead of exposing a raw parser error. Existing host verification and grants remain required; nothing is retried.
 
 - Vault Argon2id uses pinned `hash-wasm` only when native crypto reports `ERR_CRYPTO_ARGON2_NOT_SUPPORTED` (for example Electron/BoringSSL). Existing parameters, encrypted vault format and native-readable output remain unchanged.
